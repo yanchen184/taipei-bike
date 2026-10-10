@@ -2,17 +2,17 @@ import { describe, expect, test } from 'vitest'
 import brief from '../../docs/art/brief.md?raw'
 import { FACADE_TILE, TEXTURE_URLS, facadeGlassRects } from './textures'
 
-const MAX_TOTAL_BYTES = 6 * 1024 * 1024
+const MAX_TOTAL_BYTES = 1024 * 1024
 /** 檔名 → base64 data URL */
 const files = Object.fromEntries(
-  Object.entries(import.meta.glob<string>('../assets/textures/*.png', { eager: true, query: '?inline', import: 'default' })).map(
+  Object.entries(import.meta.glob<string>('../assets/textures/*.jpg', { eager: true, query: '?inline', import: 'default' })).map(
     ([path, url]) => [path.split('/').pop()!, url],
   ),
 )
 
 /** brief 清單表格的每一列：`檔名` | 寬×高 */
 function briefList(): { file: string; width: number; height: number }[] {
-  return [...brief.matchAll(/^\| `([\w-]+\.png)` \| (\d+)×(\d+) \|/gm)].map((m) => ({
+  return [...brief.matchAll(/^\| `([\w-]+\.jpg)` \| (\d+)×(\d+) \|/gm)].map((m) => ({
     file: m[1]!,
     width: Number(m[2]),
     height: Number(m[3]),
@@ -23,15 +23,21 @@ function bytes(dataUrl: string): Uint8Array {
   return Uint8Array.from(atob(dataUrl.slice(dataUrl.indexOf(',') + 1)), (c) => c.charCodeAt(0))
 }
 
-/** PNG 檔頭 IHDR 的寬高 */
-function pngSize(data: Uint8Array): { width: number; height: number } {
+/** JPEG 第一個 SOF 區段（基線或漸進式）的寬高 */
+function jpegSize(data: Uint8Array): { width: number; height: number } {
   const view = new DataView(data.buffer)
-  expect(String.fromCharCode(...data.subarray(1, 4))).toBe('PNG')
-  return { width: view.getUint32(16), height: view.getUint32(20) }
+  expect(view.getUint16(0)).toBe(0xffd8)
+  let offset = 2
+  while (offset < data.length) {
+    const marker = view.getUint16(offset)
+    if (marker === 0xffc0 || marker === 0xffc2) return { width: view.getUint16(offset + 7), height: view.getUint16(offset + 5) }
+    offset += 2 + view.getUint16(offset + 2)
+  }
+  throw new Error('JPEG 沒有 SOF 區段')
 }
 
 describe('寫實貼圖', () => {
-  test('[V1-3] 貼圖檔的檔名與尺寸符合 brief，總大小不超過 6 MB', () => {
+  test('[V1-3] 貼圖檔的檔名與尺寸符合 brief，總大小不超過 1 MB', () => {
     const list = briefList()
     expect(list).toHaveLength(Object.keys(TEXTURE_URLS).length)
     let total = 0
@@ -39,7 +45,7 @@ describe('寫實貼圖', () => {
       const url = files[file]
       expect(url, file).toBeDefined()
       const data = bytes(url!)
-      expect(pngSize(data), file).toEqual({ width, height })
+      expect(jpegSize(data), file).toEqual({ width, height })
       total += data.length
     }
     expect(total).toBeLessThanOrEqual(MAX_TOTAL_BYTES)
