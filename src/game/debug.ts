@@ -1,0 +1,83 @@
+import type * as THREE from 'three'
+import { readNightGlow } from '../render/materials'
+import { sceneSurfaces, type SceneSurfaces } from '../render/sceneProbe'
+import { textureStatus } from '../render/textures'
+import { hornPlayCount } from './audio'
+import type { GameEngine, GameState } from './engine'
+import type { OnlineSession, RosterEntry } from './online'
+
+export interface DebugDoor {
+  id: string
+  address: string
+  door: { x: number; z: number }
+  facing: number
+}
+
+/** E2E 與線上驗收用的測試掛鉤 */
+export interface TaipeiDebug {
+  state(): Omit<GameState, 'traffic'>
+  teleport(x: number, z: number, heading?: number): void
+  setTime(t: number): void
+  doors(): DebugDoor[]
+  lighting(): ReturnType<typeof readNightGlow>
+  hornPlays(): number
+  /** 每張貼圖的實際尺寸；未載入時為 0 */
+  textures(): ReturnType<typeof textureStatus>
+  /** 畫面上可見 mesh 實際綁定的貼圖與發光材質；場景未建立時為空 */
+  surfaces(): SceneSurfaces
+  /** 畫面上正在畫的其他玩家與補間後的位置；單人時為空 */
+  remotes(): DebugRemote[]
+  /** 房號與房內名單；單人時為 null */
+  room(): { code: string; uid: string; seed: number; players: readonly RosterEntry[] } | null
+}
+
+export interface DebugRemote {
+  uid: string
+  name: string
+  x: number
+  z: number
+  mode: 'walk' | 'drive'
+  loc: string
+}
+
+declare global {
+  interface Window {
+    __taipei?: TaipeiDebug
+  }
+}
+
+export function debugEnabled(location: Location): boolean {
+  return import.meta.env.DEV || new URLSearchParams(location.search).get('debug') === '1'
+}
+
+/** 掛上 window.__taipei，回傳卸載函式 */
+export function installDebug(
+  target: Window,
+  engine: GameEngine,
+  online: OnlineSession | null,
+  scene: THREE.Scene | null,
+): () => void {
+  target.__taipei = {
+    state: () => {
+      const { traffic: _traffic, ...rest } = engine.state
+      return structuredClone(rest)
+    },
+    teleport: (x, z, heading) => engine.teleport(x, z, heading),
+    setTime: (t) => engine.setTime(t),
+    doors: () => engine.city.homes.map((h) => ({ id: h.id, address: h.address, door: h.door, facing: h.facing })),
+    lighting: readNightGlow,
+    hornPlays: hornPlayCount,
+    textures: textureStatus,
+    surfaces: () => (scene ? sceneSurfaces(scene) : { maps: [], glowing: [] }),
+    remotes: () => {
+      if (!online) return []
+      const names = new Map(online.store.getRoster().map((p) => [p.uid, p.name]))
+      return [...online.store.rendered].map(([uid, s]) => ({ uid, name: names.get(uid) ?? '', x: s.x, z: s.z, mode: s.mode, loc: s.loc }))
+    },
+    room: () =>
+      online && { code: online.link.code, uid: online.link.uid, seed: online.link.meta.seed, players: online.store.getRoster() },
+  }
+  return () => {
+    delete target.__taipei
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "rules": {
+    "taipeiBike": {
+      "rooms": {
+        "$code": {
+          ".read": "auth != null",
+          "meta": {
+            ".write": "auth != null && ((!data.exists() && newData.child('creatorUid').val() === auth.uid) || (!newData.exists() && data.child('creatorUid').val() === auth.uid && !data.parent().child('slots').exists() && !data.parent().child('players').exists() && !data.parent().child('states').exists()))",
+            ".validate": "newData.hasChildren(['seed', 'creatorUid', 'createdAt'])",
+            "seed": {
+              ".validate": "newData.isNumber()"
+            },
+            "creatorUid": {
+              ".validate": "newData.isString()"
+            },
+            "createdAt": {
+              ".validate": "newData.val() === now"
+            },
+            "$other": {
+              ".validate": false
+            }
+          },
+          "slots": {
+            "$slot": {
+              ".write": "auth != null && $slot.matches(/^[0-5]$/) && ((newData.exists() && root.child('taipeiBike/rooms/' + $code + '/meta').exists() && (!data.exists() || data.val() === auth.uid || !newData.parent().parent().child('players/' + data.val()).exists())) || (!newData.exists() && data.val() === auth.uid && !newData.parent().parent().child('players/' + auth.uid).exists()))",
+              ".validate": "newData.val() === auth.uid && newData.parent().parent().child('players/' + auth.uid).exists() && ($slot === '0' || newData.parent().child('0').val() !== auth.uid) && ($slot === '1' || newData.parent().child('1').val() !== auth.uid) && ($slot === '2' || newData.parent().child('2').val() !== auth.uid) && ($slot === '3' || newData.parent().child('3').val() !== auth.uid) && ($slot === '4' || newData.parent().child('4').val() !== auth.uid) && ($slot === '5' || newData.parent().child('5').val() !== auth.uid)"
+            }
+          },
+          "players": {
+            "$uid": {
+              ".write": "auth != null && auth.uid === $uid",
+              ".validate": "newData.hasChildren(['name', 'joinedAt']) && (newData.parent().parent().child('slots/0').val() === $uid || newData.parent().parent().child('slots/1').val() === $uid || newData.parent().parent().child('slots/2').val() === $uid || newData.parent().parent().child('slots/3').val() === $uid || newData.parent().parent().child('slots/4').val() === $uid || newData.parent().parent().child('slots/5').val() === $uid)",
+              "name": {
+                ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 12 && newData.val().matches(/^[^ \t\u000b\f\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\ufeff](.*[^ \t\u000b\f\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\ufeff])?$/) && !newData.val().beginsWith('\\n') && !newData.val().endsWith('\\n') && !newData.val().beginsWith('\\r') && !newData.val().endsWith('\\r') && !newData.val().beginsWith('\\u2028') && !newData.val().endsWith('\\u2028') && !newData.val().beginsWith('\\u2029') && !newData.val().endsWith('\\u2029')"
+              },
+              "joinedAt": {
+                ".validate": "newData.val() === now"
+              },
+              "$other": {
+                ".validate": false
+              }
+            }
+          },
+          "states": {
+            "$uid": {
+              ".write": "auth != null && auth.uid === $uid && (!newData.exists() || newData.parent().parent().child('players/' + $uid).exists())",
+              ".validate": "newData.hasChildren(['x', 'z', 'h', 'mode', 'cx', 'cz', 'ch', 'loc', 't'])",
+              "x": {
+                ".validate": "newData.isNumber()"
+              },
+              "z": {
+                ".validate": "newData.isNumber()"
+              },
+              "h": {
+                ".validate": "newData.isNumber()"
+              },
+              "mode": {
+                ".validate": "newData.val() === 'walk' || newData.val() === 'drive'"
+              },
+              "cx": {
+                ".validate": "newData.isNumber()"
+              },
+              "cz": {
+                ".validate": "newData.isNumber()"
+              },
+              "ch": {
+                ".validate": "newData.isNumber()"
+              },
+              "loc": {
+                ".validate": "newData.isString() && newData.val().length <= 64"
+              },
+              "t": {
+                ".validate": "newData.val() === now"
+              },
+              "$other": {
+                ".validate": false
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
