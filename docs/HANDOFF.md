@@ -13,7 +13,7 @@
 |---|---|
 | WO5 競速模擬 | 已 commit（adff03e） |
 | WO6 單人＋AI 流程 | 已 commit（5f5649d） |
-| WO7 競速連線 | 已 commit（2754108、review 修正 e93aa27）；完整 flow:status 本機節點全 ✅；Codex 第 1–7 輪的問題都已修，第 8 輪由 Claude code-reviewer 審為 APPROVED，**Codex 第 9 輪待跑** |
+| WO7 競速連線 | 已 commit（2754108、review 修正 e93aa27）；完整 flow:status 本機節點全 ✅；Codex 第 1–7 輪的問題都已修，Codex 第 9 輪 VERDICT: APPROVED（2026-10-12） |
 | WO8 上線驗收 | 未開始 |
 
 ### WO7 已驗證（2026-10-12，本機，commit e93aa27）
@@ -35,9 +35,8 @@ Review 修正重點（e93aa27）：
 
 ## 接下來的步驟
 
-1. Codex review 直到 APPROVED（prompt 範本：session scratchpad 的 `review9.txt`；每輪把上一輪的修正補一段 `(x) 第N輪 review 的修正：…`）。Codex 額度用完時要等重置。
-2. WO8（見 `docs/work-orders/WO8-race-deploy.md`）：**部署資料庫規則到 `bikes-bbd76` 前先問尊上**；部署規則 → **問過尊上後**合併／push main → 線上驗收 `LIVE_URL=https://yanchen184.github.io/taipei-bike/ EXPECTED_SHA=<main 的 SHA> npm run flow:status`。
-3. 更新流程圖與手冊。
+1. WO8（見 `docs/work-orders/WO8-race-deploy.md`）：**部署資料庫規則到 `bikes-bbd76` 前先問尊上**；部署規則 → **問過尊上後**合併／push main → 線上驗收 `LIVE_URL=https://yanchen184.github.io/taipei-bike/ EXPECTED_SHA=<main 的 SHA> npm run flow:status`。
+2. 更新流程圖與手冊（競速截圖已加在 `docs/manual/img/09`–`12`）。
 
 ## 新電腦環境
 
