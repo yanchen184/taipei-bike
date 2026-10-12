@@ -1,6 +1,6 @@
 # 交接：Phase 2 競速（2026-10-12）
 
-分支 `feat/phase2-race`。main 仍是 Phase 1（線上 https://yanchen184.github.io/taipei-bike/ ，SHA 304936d）。
+分支 `yanchen184/goatfish`。main 仍是 Phase 1（線上 https://yanchen184.github.io/taipei-bike/ ，SHA 304936d）。
 **push main 會觸發 GitHub Actions 部署**，WO8 之前不要合併 main。
 
 ## 尊上已拍板的規則
@@ -13,30 +13,30 @@
 |---|---|
 | WO5 競速模擬 | 已 commit（adff03e） |
 | WO6 單人＋AI 流程 | 已 commit（5f5649d） |
-| WO7 競速連線 | 程式與測試完成、本機驗證過；**還沒跑完整 flow:status、還沒 Codex review** |
+| WO7 競速連線 | 已 commit（2754108、review 修正 e93aa27）；完整 flow:status 本機節點全 ✅；Codex 第 1–7 輪的問題都已修，第 8 輪由 Claude code-reviewer 審為 APPROVED，**Codex 第 9 輪待跑** |
 | WO8 上線驗收 | 未開始 |
 
-### WO7 已驗證（2026-10-12，本機）
+### WO7 已驗證（2026-10-12，本機，commit e93aa27）
 
-- `npx tsc -b --noEmit` 通過
-- `npx vitest run`：21 檔 120 個測試全過
-- emulator 單元測試（`tests/emu/`）：41/41
-- `tests/e2e/race-online.spec.ts`：G1-2、N1-1、N1-2、N1-4 共 4/4 通過
+- `npm run build` 通過；`npx tsc -b`、`npx tsc --noEmit -p tsconfig.e2e.json` 通過
+- `npx vitest run`：131/131
+- emulator 單元測試（`tests/emu/`）：46/46
+- `npm run flow:status`：除 S1、S2（線上驗收）外全部 ✅
+- 真瀏覽器（有畫面）兩個 browser context 連 emulator 跑一局 2 台 AI：賽道相同、互相看得到、AI 位置兩邊一致、成績表一致（腳本在 session scratchpad 的 `two-tab.cjs`，沒有進 repo）
 
-WO7 最後修的三個連線計時問題（都有 `[N1-1]` 單元測試）：
+Review 修正重點（e93aa27）：
 
-- 自己的完成時間改用伺服器寫入的 `fin`（`controller.ts` 的 `myFin`）
-- 同一局的 `meta.at` 被伺服器修正時更新 round（serverTimestamp 先給本機估計值）
-- 房主畫面上 AI 的完成時間優先用伺服器寫入的值（`aiFinOf`）
+- 開新一局等待伺服器確認期間不寫入進度與 AI、不重入；檢查點數依 transaction 讀到的局數算
+- 加入時已是房主的人從最後同步的位置接手 AI；停止監聽時拿掉背景掛點
+- rules：`meta` 不能部分修改；新局必須換局數並重蓋伺服器時間；同一局不能清掉進度與 AI；玩家完成時間寫入後不能刪改
+- 3D 畫面加 `isolate`，名牌不再蓋住成績表等介面
+- 已知限制：rules 不驗證 `cps` 是否等於該局賽道的檢查點數（規則算不出賽道），房主寫錯只影響自己的房間
 
 ## 接下來的步驟
 
-1. 跑完整 `npm run flow:status`，確認 `docs/flow-status.md` WO7 相關節點全 ✅。這台機器上次跑到一半因記憶體不足被系統中止，全套要 10 分鐘以上。
-2. Codex review 兩段（先查是否符合 `docs/work-orders/WO7-race-net.md` 與 spec，再查程式品質），每輪開新 session，直到 APPROVED；review 後再改的程式要重新 review。prompt 草稿見本檔最後一節。
-3. 真瀏覽器兩個分頁實際連線跑一局（`npm run dev` 連 emulator）。
-4. commit WO7。
-5. WO8（見 `docs/work-orders/WO8-race-deploy.md`）：**部署資料庫規則到 `bikes-bbd76` 前先問尊上**；部署規則 → 合併／push main → 線上驗收 `LIVE_URL=https://yanchen184.github.io/taipei-bike/ EXPECTED_SHA=<main 的 SHA> npm run flow:status`。
-6. 更新流程圖與手冊。
+1. Codex review 直到 APPROVED（prompt 範本：session scratchpad 的 `review9.txt`；每輪把上一輪的修正補一段 `(x) 第N輪 review 的修正：…`）。Codex 額度用完時要等重置。
+2. WO8（見 `docs/work-orders/WO8-race-deploy.md`）：**部署資料庫規則到 `bikes-bbd76` 前先問尊上**；部署規則 → **問過尊上後**合併／push main → 線上驗收 `LIVE_URL=https://yanchen184.github.io/taipei-bike/ EXPECTED_SHA=<main 的 SHA> npm run flow:status`。
+3. 更新流程圖與手冊。
 
 ## 新電腦環境
 
@@ -66,12 +66,12 @@ npm run flow:status
 
 ## 觀察到、尚未處理
 
-- 起跑格附近有 NPC 車排隊，開賽時會把騎士推開 0.6–0.8 m。
+- 專案沒有 favicon，瀏覽器 console 會有一筆 `/favicon.ico` 404（Phase 1 就有）。
 
 ## WO7 Codex review prompt 草稿
 
 ```
-你是 code reviewer（只讀，不要改任何檔案）。專案：taipei-bike，分支 feat/phase2-race。
+你是 code reviewer（只讀，不要改任何檔案）。專案：taipei-bike，分支 yanchen184/goatfish。
 審查範圍：WO7 的 commit（實作 docs/work-orders/WO7-race-net.md）。
 規格來源：docs/work-orders/WO7-race-net.md、docs/spec/00-rules.md、docs/spec/01-flow.md（N1、N2、G1-2、B1-5、A1-5）、docs/spec/02-architecture.md。
 第一段「符合工單與 spec」：每條驗收條件都有 [ID] 測試且真的驗到；資料模型、伺服器時間戳、只有房主寫 AI、開賽後加入不參賽；database.rules.json 正確且不過寬。
