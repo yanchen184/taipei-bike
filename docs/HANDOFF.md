@@ -22,6 +22,7 @@
 - `npx vitest run`：131/131
 - emulator 單元測試（`tests/emu/`）：46/46
 - `npm run flow:status`：除 S1、S2（線上驗收）外全部 ✅
+- 線上驗收測試 `tests/live/race.spec.ts`（S2-1、S2-2）已寫好，用本機 vite＋emulator 當 LIVE_URL 跑過：2 passed
 - 真瀏覽器（有畫面）兩個 browser context 連 emulator 跑一局 2 台 AI：賽道相同、互相看得到、AI 位置兩邊一致、成績表一致（腳本在 session scratchpad 的 `two-tab.cjs`，沒有進 repo）
 
 Review 修正重點（e93aa27）：
@@ -66,6 +67,7 @@ npm run flow:status
 
 ## 觀察到、尚未處理
 
+- 競速倒數時，排在玩家後一格的 AI 會擋住相機（截圖 `docs/manual/img/10-race-countdown.png`）。
 - 專案沒有 favicon，瀏覽器 console 會有一筆 `/favicon.ico` 404（Phase 1 就有）。
 
 ## WO7 Codex review prompt 草稿

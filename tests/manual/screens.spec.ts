@@ -52,3 +52,28 @@ test('04 夜晚', async ({ page }) => {
   await expect(page.getByTestId('clock')).toContainText('🌙')
   await shot(page, '08-night')
 })
+
+test('05 競速', async ({ page }) => {
+  await startSolo(page, '阿騎')
+  await expect(page.getByTestId('race-lobby')).toBeVisible()
+  await page.getByTestId('race-ai-count').selectOption('3')
+  await shot(page, '09-race-lobby')
+
+  await page.getByTestId('race-start').click()
+  await expect(page.getByTestId('race-countdown')).toBeVisible()
+  await shot(page, '10-race-countdown')
+
+  await expect.poll(() => page.evaluate(() => window.__taipei!.race()?.view.phase), { timeout: 8_000 }).toBe('racing')
+  await page.keyboard.down('w')
+  await page.waitForTimeout(2500)
+  await page.keyboard.up('w')
+  await shot(page, '11-race-riding')
+
+  const checkpoints = await page.evaluate(() => window.__taipei!.race()!.checkpoints)
+  for (const [k, c] of checkpoints.entries()) {
+    await page.evaluate(([x, z]) => window.__taipei!.teleport(x!, z!), [c.x, c.z])
+    await expect.poll(() => page.evaluate(() => window.__taipei!.race()!.view.cp)).toBe(k + 1)
+  }
+  await expect(page.getByTestId('race-results')).toBeVisible({ timeout: 45_000 })
+  await shot(page, '12-race-results')
+})
