@@ -2,10 +2,18 @@ import { describe, expect, test } from 'vitest'
 import { STRIDE, generateCity, isOnRoad } from './city'
 import { isFree } from './collide'
 import { CHECKPOINT_RADIUS, GRID_SIZE, advanceCheckpoint, checkpointPos, generateCourse } from './course'
+import { VEHICLE_SPEC, buildRoutes } from './traffic'
+import type { Vec2 } from './types'
 import { BIKE_SPEC } from './vehicle'
 
 const SEEDS = [1, 3, 42, 2024, 99999]
 const ROUNDS = Array.from({ length: 20 }, (_, k) => k + 1)
+
+/** 點到線段的距離 */
+function segmentDistance(p: Vec2, a: Vec2, d: Vec2, length: number): number {
+  const u = Math.min(Math.max((p.x - a.x) * d.x + (p.z - a.z) * d.z, 0), length)
+  return Math.hypot(p.x - (a.x + d.x * u), p.z - (a.z + d.z * u))
+}
 
 describe('K1 賽道生成', () => {
   test('[K1-1] 同一個 seed 與局數產生的賽道相同，換局數會換路線', () => {
@@ -47,9 +55,10 @@ describe('K1 賽道生成', () => {
     expect([...lengths].sort()).toEqual([12, 14, 16])
   })
 
-  test('[K1-3] 6 個起跑格在路面上、不與物體或彼此重疊，朝向賽道第一段', () => {
+  test('[K1-3] 6 個起跑格在路面上、不與物體或彼此重疊、不在 NPC 汽機車的行車範圍內，朝向賽道第一段', () => {
     for (const seed of SEEDS) {
       const city = generateCity(seed)
+      const routes = buildRoutes(city)
       for (const n of ROUNDS) {
         const { nodes, grid } = generateCourse(city, n)
         expect(grid).toHaveLength(GRID_SIZE)
@@ -61,8 +70,14 @@ describe('K1 賽道生成', () => {
           expect(isFree(slot.pos, BIKE_SPEC.radius, city.colliders)).toBe(true)
           expect(slot.heading).toBeCloseTo(toward, 12)
           const along = ((slot.pos.x - a.x) * (b.x - a.x) + (slot.pos.z - a.z) * (b.z - a.z)) / len
-          expect(along).toBeGreaterThanOrEqual(4)
-          expect(along).toBeLessThanOrEqual(14)
+          expect(along).toBeGreaterThanOrEqual(10)
+          expect(along).toBeLessThanOrEqual(30)
+          for (const route of routes) {
+            const clearance = VEHICLE_SPEC[route.kind].radius + BIKE_SPEC.radius
+            for (const seg of route.segments) {
+              expect(segmentDistance(slot.pos, seg, { x: seg.dx, z: seg.dz }, seg.length)).toBeGreaterThan(clearance)
+            }
+          }
         }
         for (let i = 0; i < grid.length; i++) {
           for (let j = i + 1; j < grid.length; j++) {

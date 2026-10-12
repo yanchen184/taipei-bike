@@ -36,6 +36,8 @@ export interface TaipeiDebug {
   race(): DebugRace | null
   /** 場景中是否有這個名字的物件 */
   hasObject(name: string): boolean
+  /** 這個名字的物件畫在畫面上時的世界座標；不存在或本身、上層被隱藏時為 null */
+  shown(name: string): Vec2 | null
 }
 
 export interface DebugRace {
@@ -95,6 +97,14 @@ export function installDebug(
     room: () =>
       online && { code: online.link.code, uid: online.link.uid, seed: online.link.meta.seed, players: online.store.getRoster() },
     hasObject: (name) => scene?.getObjectByName(name) !== undefined,
+    shown: (name) => {
+      const object = scene?.getObjectByName(name)
+      if (!object) return null
+      for (let o: THREE.Object3D | null = object; o; o = o.parent) if (!o.visible) return null
+      object.updateWorldMatrix(true, false)
+      const e = object.matrixWorld.elements
+      return { x: e[12]!, z: e[14]! }
+    },
     race: () => {
       const course = race.course()
       const slot = race.slot()

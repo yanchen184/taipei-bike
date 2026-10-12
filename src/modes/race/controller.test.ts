@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { GameEngine, type Storage } from '../../game/engine'
-import { checkpointPos, nodePose } from '../../sim/course'
+import { checkpointPos, generateCourse, nodePose } from '../../sim/course'
 import { goTime, type Progress, type RaceMeta } from '../../sim/race'
 import { INTERP_DELAY } from '../../sim/sync'
 import type { Vec2 } from '../../sim/types'
@@ -17,7 +17,7 @@ function memoryStorage(): Storage {
   return { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) }
 }
 
-function setup(link?: (now: () => number) => RaceLink) {
+function setup(link?: (now: () => number) => RaceLink, onError?: (error: Error) => void) {
   let t = 1_000_000
   const now = () => t
   const engine = new GameEngine({ seed: 3, name: '阿明', storage: memoryStorage(), now })
@@ -32,8 +32,9 @@ function setup(link?: (now: () => number) => RaceLink) {
       if (on) controller.enter()
       else controller.exit()
     },
+    onError,
   })
-  controller.connect()
+  const disconnect = controller.connect()
   const ride = async (seconds: number, input = IDLE) => {
     for (let k = 0; k < Math.round(seconds / DT); k++) {
       t += DT * 1000
@@ -46,7 +47,7 @@ function setup(link?: (now: () => number) => RaceLink) {
     engine.teleport(p.x, p.z)
     return ride(DT)
   }
-  return { engine, link: raceLink, controller, ride, player, at, inRace: () => inRace, now }
+  return { engine, link: raceLink, controller, ride, player, at, inRace: () => inRace, now, disconnect }
 }
 
 function distance(a: Vec2, b: Vec2): number {
@@ -76,8 +77,9 @@ function twoPlayerLink(now: () => number) {
       onChange(snap)
       return () => listeners.delete(onChange)
     },
-    async start(ai, cps) {
-      const meta: RaceMeta = { n: (snap.meta?.n ?? 0) + 1, ai, cps, at: now(), entrants: { me: 0, other: 1 } }
+    async start(ai, cpsOf) {
+      const n = (snap.meta?.n ?? 0) + 1
+      const meta: RaceMeta = { n, ai, cps: cpsOf(n), at: now(), entrants: { me: 0, other: 1 } }
       publish({ meta, progress: {}, ai: {} })
     },
     async sendProgress(p) {
@@ -111,6 +113,10 @@ function memoryRoom(now: () => number, initial: readonly RaceEntrant[]) {
     members = members.filter((m) => m.id !== id)
     publish(snap)
   }
+  const join = (entrant: RaceEntrant) => {
+    members = [...members, entrant]
+    publish(snap)
+  }
   const linkFor = (selfId: string): RaceLink => ({
     selfId,
     serverNow: now,
@@ -122,9 +128,10 @@ function memoryRoom(now: () => number, initial: readonly RaceEntrant[]) {
       onChange(snap)
       return () => listeners.delete(onChange)
     },
-    async start(ai, cps) {
+    async start(ai, cpsOf) {
       const entrants = Object.fromEntries(members.map((m, k) => [m.id, k]))
-      publish({ meta: { n: (snap.meta?.n ?? 0) + 1, ai, cps, at: now(), entrants }, progress: {}, ai: {} })
+      const n = (snap.meta?.n ?? 0) + 1
+      publish({ meta: { n, ai, cps: cpsOf(n), at: now(), entrants }, progress: {}, ai: {} })
     },
     async sendProgress(p) {
       publish({ ...snap, progress: { ...snap.progress, [selfId]: p } })
@@ -134,7 +141,7 @@ function memoryRoom(now: () => number, initial: readonly RaceEntrant[]) {
       publish({ ...snap, ai })
     },
   })
-  return { linkFor, aiWriters, leave }
+  return { linkFor, aiWriters, leave, join }
 }
 
 /** 同一個房間裡的兩位玩家，各有自己的引擎與控制器，時間一起走 */
@@ -174,7 +181,7 @@ function twoRiders() {
       await new Promise((resolve) => setTimeout(resolve, 0))
     }
   }
-  return { me, other, ride, room, now }
+  return { me, other, ride, room, now, rider }
 }
 
 describe('G1 開賽', () => {
@@ -500,6 +507,222 @@ describe('N1 比賽同步', () => {
     expect(room.aiWriters).toEqual(new Set(['me', 'other']))
     other.controller.aiRiders().forEach((a, k) => expect(distance(a.pos, resumed[k]!)).toBeGreaterThan(5))
   })
+
+  test('[N1-2] 倒數期間其他人畫面上的 AI 就在起跑格上', async () => {
+    const { me, other, ride } = twoRiders()
+    await me.controller.start(2)
+    await ride(1)
+    expect(other.controller.view().phase).toBe('countdown')
+    const course = other.controller.course()!
+    const shown = other.controller.aiRiders()
+    expect(shown).toHaveLength(2)
+    shown.forEach((a, k) => expect(distance(a.pos, course.grid[k + 2]!.pos)).toBeLessThan(0.01))
+  })
+
+  test('[N1-3] 開賽後才加入的玩家成為房主時接手推進 AI，但不參賽', async () => {
+    const { me, other, ride, room, rider } = twoRiders()
+    await me.controller.start(2)
+    await ride(5)
+    room.join({ id: 'late', name: '阿花' })
+    const late = rider('late', '阿花')
+    await ride(DT, [me, other, late])
+    expect(late.inRace()).toBe(false)
+    expect(late.controller.slot()).toBeNull()
+
+    room.leave('me')
+    room.leave('other')
+    await ride(DT, [late])
+    const resumed = late.controller.aiRiders().map((a) => a.pos)
+    await ride(2, [late])
+    expect(room.aiWriters).toEqual(new Set(['me', 'late']))
+    late.controller.aiRiders().forEach((a, k) => expect(distance(a.pos, resumed[k]!)).toBeGreaterThan(5))
+    expect(late.inRace()).toBe(false)
+  })
+
+  test('[N1-3] 開局時已是房主的晚到玩家從最後同步的位置接手 AI，不會回到起跑格', async () => {
+    const { me, ride, room, rider } = twoRiders()
+    await me.controller.start(2)
+    await ride(8)
+    const course = me.controller.course()!
+    const handover = me.controller.aiRiders().map((a) => a.pos)
+    expect(distance(handover[0]!, course.grid[2]!.pos)).toBeGreaterThan(10)
+
+    room.leave('me')
+    room.leave('other')
+    room.join({ id: 'late', name: '阿花' })
+    const late = rider('late', '阿花')
+    await ride(DT, [late])
+    const resumed = late.controller.aiRiders().map((a) => a.pos)
+    resumed.forEach((pos, k) => expect(distance(pos, handover[k]!)).toBeLessThan(1.5))
+  })
+
+  test('[N1-3] 房主退出比賽回到城市後仍繼續推進並寫入 AI', async () => {
+    const { me, other, ride } = twoRiders()
+    await me.controller.start(2)
+    await ride(5)
+    me.controller.leave()
+    expect(me.inRace()).toBe(false)
+    const before = other.controller.aiRiders().map((a) => a.pos)
+    await ride(2)
+    other.controller.aiRiders().forEach((a, k) => expect(distance(a.pos, before[k]!)).toBeGreaterThan(5))
+  })
+
+  test('[N1-3] 已退出比賽的玩家成為房主時也會接手推進 AI', async () => {
+    const { me, other, ride, room } = twoRiders()
+    await me.controller.start(2)
+    await ride(5)
+    other.controller.leave()
+    room.leave('me')
+    await ride(DT, [other])
+    const resumed = other.controller.aiRiders().map((a) => a.pos)
+    await ride(2, [other])
+    expect(room.aiWriters).toEqual(new Set(['me', 'other']))
+    other.controller.aiRiders().forEach((a, k) => expect(distance(a.pos, resumed[k]!)).toBeGreaterThan(5))
+  })
+
+  test('[N1-1] 最後一台 AI 完成後比賽立刻結束，完成時間仍會寫入，寫入失敗時重送', async () => {
+    const errors: Error[] = []
+    const { controller, link, ride, at } = setup(undefined, (e) => errors.push(e))
+    let stored: RaceSnapshot = EMPTY_RACE
+    link.watch((s) => {
+      stored = s
+    })
+    const send = link.sendAi.bind(link)
+    let rejected = false
+    link.sendAi = (ai) => {
+      if (ai['0']?.fin === undefined || rejected) return send(ai)
+      rejected = true
+      return Promise.reject(new Error('寫入失敗'))
+    }
+    await controller.start(1)
+    const course = controller.course()!
+    const cps = course.checkpoints.length
+    for (let k = 0; k < 300 && controller.aiRiders()[0]!.cp < cps - 1; k++) await ride(1)
+    for (let k = 0; k < cps; k++) await at(checkpointPos(course, k))
+    expect(controller.view().finished).toBe(true)
+    for (let k = 0; k < 600 && !controller.aiRiders()[0]!.fin; k++) await ride(0.1)
+    await ride(0.5)
+
+    expect(controller.view().phase).toBe('over')
+    expect(rejected).toBe(true)
+    expect(errors.map((e) => e.message)).toEqual(['寫入失敗'])
+    expect(stored.ai['0']?.fin).toBeDefined()
+  }, 180_000)
+})
+
+describe('G1 開新的一局被拒絕', () => {
+  test('[G1-4] 開新一局被伺服器拒絕時顯示錯誤，進行中的那一局照常繼續', async () => {
+    const errors: Error[] = []
+    let snap: RaceSnapshot = EMPTY_RACE
+    let reject = false
+    const { controller, inRace, ride } = setup((now) => {
+      const base = localRaceLink('me', '阿明', now)
+      base.watch((s) => {
+        snap = s
+      })
+      return {
+        ...base,
+        start: (ai, cps) => (reject ? Promise.reject(new Error('權限不足')) : base.start(ai, cps)),
+      }
+    }, (e) => errors.push(e))
+
+    await controller.start(2)
+    await ride(4)
+    reject = true
+    await controller.start(0)
+    expect(errors.map((e) => e.message)).toEqual(['權限不足'])
+    expect(snap.meta?.n).toBe(1)
+    expect(inRace()).toBe(true)
+    expect(controller.view().n).toBe(1)
+    const before = controller.aiRiders().map((a) => a.pos)
+    await ride(2)
+    controller.aiRiders().forEach((a, k) => expect(distance(a.pos, before[k]!)).toBeGreaterThan(5))
+  })
+
+  // 伺服器確認前送出比賽資料的寫入會讓開新一局的 transaction 中止
+  test('[G1-4] 開新一局等待伺服器確認期間不寫入進度與 AI', async () => {
+    let hold = false
+    let gate: (() => void) | null = null
+    const writes: string[] = []
+    const { controller, ride, at } = setup((now) => {
+      const base = localRaceLink('me', '阿明', now)
+      return {
+        ...base,
+        start: (ai, cpsOf) => {
+          if (!hold) return base.start(ai, cpsOf)
+          return new Promise<void>((resolve, reject) => {
+            gate = () => base.start(ai, cpsOf).then(resolve, reject)
+          })
+        },
+        sendProgress: (p) => {
+          if (gate) writes.push('progress')
+          return base.sendProgress(p)
+        },
+        sendAi: (ai) => {
+          if (gate) writes.push('ai')
+          return base.sendAi(ai)
+        },
+      }
+    })
+
+    await controller.start(2)
+    await ride(4)
+    hold = true
+    const started = controller.start(2)
+    await at(checkpointPos(controller.course()!, 0))
+    await ride(1)
+    expect(writes).toEqual([])
+    expect(controller.view().n).toBe(1)
+
+    gate!()
+    gate = null
+    await started
+    expect(controller.view().n).toBe(2)
+  })
+
+  // 開局的 transaction 重試時局數可能和本機看到的不同
+  test('[G1-4] 開新一局的檢查點數依伺服器實際開出的局數計算', async () => {
+    let cpsOf: ((n: number) => number) | null = null
+    const { engine, controller } = setup((now) => {
+      const base = localRaceLink('me', '阿明', now)
+      return {
+        ...base,
+        start: (ai, f) => {
+          cpsOf = f
+          return base.start(ai, f)
+        },
+      }
+    })
+
+    await controller.start(0)
+    const rounds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    expect(rounds.map((n) => cpsOf!(n))).toEqual(rounds.map((n) => generateCourse(engine.city, n).checkpoints.length))
+  })
+
+  test('[G1-4] 等待伺服器確認期間再按開始不會再開一局', async () => {
+    let gate: (() => void) | null = null
+    let starts = 0
+    const { controller } = setup((now) => {
+      const base = localRaceLink('me', '阿明', now)
+      return {
+        ...base,
+        start: (ai, cpsOf) => {
+          starts += 1
+          return new Promise<void>((resolve, reject) => {
+            gate = () => base.start(ai, cpsOf).then(resolve, reject)
+          })
+        },
+      }
+    })
+
+    const first = controller.start(2)
+    const second = controller.start(2)
+    expect(starts).toBe(1)
+    gate!()
+    await Promise.all([first, second])
+    expect(starts).toBe(1)
+    expect(controller.view().n).toBe(1)
+  })
 })
 
 test('[B1-5] 連線比賽時自己的腳踏車撞到其他參賽玩家會被推開，已完賽的玩家不擋路', async () => {
@@ -531,4 +754,28 @@ test('[A1-5] 房主算的 AI 撞到其他參賽玩家時被推開', async () => 
   other.at({ x: ai.x + 0.2, z: ai.z })
   await ride(DT, [me])
   expect(distance(me.controller.aiRiders()[0]!.pos, other.engine.state.player.pos)).toBeGreaterThan(BIKE_SPEC.radius * 2 - 0.01)
+})
+
+test('[N1-3] 停止監聽後，回到城市的房主不再於背景推進或上傳 AI', async () => {
+  let writes = 0
+  const { controller, ride, disconnect } = setup((now) => {
+    const base = localRaceLink('me', '阿明', now)
+    return {
+      ...base,
+      sendAi: (ai) => {
+        writes += 1
+        return base.sendAi(ai)
+      },
+    }
+  })
+  await controller.start(2)
+  await ride(4)
+  controller.leave()
+  await ride(1)
+  expect(writes).toBeGreaterThan(0)
+
+  disconnect()
+  writes = 0
+  await ride(2)
+  expect(writes).toBe(0)
 })

@@ -47,13 +47,15 @@ beforeEach(async () => {
 afterAll(() => env.cleanup())
 
 describe('N2 比賽安全規則', () => {
-  test('[N2-1] 只有房主能開新的一局或刪除比賽，開新局時清掉上一局的進度與 AI', async () => {
+  test('[N2-1] 只有房主能開新的一局或刪除比賽，開新局時清掉上一局的進度與 AI，不能寫 meta 以外的欄位', async () => {
     await seed(`${RACE}/progress/bob`, { n: 1, cp: 2 })
     await seed(`${RACE}/ai/0`, aiNet())
     await assertFails(db('bob').ref(RACE).set(newRound(2)))
     await assertFails(db('alice').ref(RACE).set({ ...newRound(2), progress: { alice: { n: 2, cp: 1 } } }))
     await assertFails(db('alice').ref(RACE).set({ ...newRound(2), ai: { '0': aiNet(2) } }))
     await assertFails(db('alice').ref(RACE).set(newRound(3)))
+    await assertFails(db('alice').ref(RACE).set({ unexpected: 1 }))
+    await assertFails(db('alice').ref(RACE).set({ ...newRound(2), unexpected: 1 }))
     await assertSucceeds(db('alice').ref(RACE).set(newRound(2)))
     expect(await read(`${RACE}/progress`)).toBeNull()
     expect(await read(`${RACE}/ai`)).toBeNull()
@@ -72,6 +74,33 @@ describe('N2 比賽安全規則', () => {
     await assertFails(start({ entrants: { alice: 6 } }))
     await assertFails(start({ extra: 1 }))
     await assertSucceeds(start({ ai: 5, cps: 8, entrants: { alice: 0, bob: 1, carol: 2 } }))
+  })
+
+  test('[N2-1] 房主只能整筆開新的一局，不能改進行中這一局的參賽者、AI 數、檢查點數或開賽時間，也不能只把局數加一沿用舊的開賽時間', async () => {
+    const alice = (path: string) => db('alice').ref(`${RACE}/${path}`)
+    await assertFails(alice('meta/entrants/carol').set(2))
+    await assertFails(alice('meta/entrants/bob').remove())
+    await assertFails(alice('meta/entrants').set({ alice: 0, carol: 1 }))
+    await assertFails(alice('meta/ai').set(3))
+    await assertFails(alice('meta/cps').set(7))
+    await assertFails(alice('meta/at').set(NOW))
+    await assertFails(alice('meta').update({ ai: 3 }))
+    await assertFails(alice('meta').set({ ...meta, ai: 3 }))
+    await assertFails(db('alice').ref(RACE).update({ 'meta/entrants/carol': 2 }))
+    await assertFails(alice('meta/n').set(2))
+    await assertFails(db('alice').ref(RACE).update({ 'meta/n': 2 }))
+    await assertFails(alice('meta').update({ n: 2, ai: 1 }))
+    expect(await read(`${RACE}/meta`)).toEqual(meta)
+    await assertSucceeds(db('alice').ref(RACE).set(newRound(2)))
+  })
+
+  test('[N2-1] 房主不能在同一局清掉進度與 AI', async () => {
+    await seed(`${RACE}/progress/bob`, { n: 1, cp: 6, fin: 5000 })
+    await seed(`${RACE}/ai/0`, { ...aiNet(), fin: 6000 })
+    await assertFails(db('alice').ref(RACE).update({ progress: null, ai: null }))
+    await assertFails(db('alice').ref(RACE).set({ meta }))
+    expect(await read(`${RACE}/progress/bob/fin`)).toBe(5000)
+    expect(await read(`${RACE}/ai/0/fin`)).toBe(6000)
   })
 
   test('[N2-1] 房主離開後，下一位最早加入的玩家成為房主', async () => {
@@ -121,6 +150,15 @@ describe('N2 比賽安全規則', () => {
     await seed(`${RACE}/progress/bob`, { n: 1, cp: 5 })
     await assertFails(progress('bob').set({ n: 1, cp: 6, fin: 12345 }))
     await assertSucceeds(progress('bob').set({ n: 1, cp: 6, fin: NOW }))
+  })
+
+  test('[N2-3] 完成時間寫入後不能刪除或改寫', async () => {
+    await seed(`${RACE}/progress/bob`, { n: 1, cp: 6, fin: 5000 })
+    await assertFails(progress('bob').child('fin').remove())
+    await assertFails(progress('bob').child('fin').set(NOW))
+    await assertFails(progress('bob').update({ fin: NOW }))
+    await assertFails(progress('bob').update({ fin: null }))
+    expect(await read(`${RACE}/progress/bob/fin`)).toBe(5000)
   })
 
   test('[N2-4] 只有開賽時在場的參賽者能寫進度', async () => {

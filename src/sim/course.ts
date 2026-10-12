@@ -7,10 +7,8 @@ export const GRID_SIZE = 6
 const CHECKPOINT_EVERY = 2
 const MIN_CHECKPOINTS = 6
 const MAX_CHECKPOINTS = 8
-/** 起跑格每排離起點路口的距離（前排先） */
-const GRID_ROWS = [14, 9, 4]
-/** 起跑格兩欄離路中線的距離：右欄、左欄 */
-const GRID_COLUMNS = [3, -3]
+/** 起跑格在路中線上離起點路口中心的距離（第 0 格最前面）；NPC 汽機車不會開進中線，8 m 以內有橫向車流 */
+const GRID_ALONG = [30, 26, 22, 18, 14, 10]
 
 export interface Course {
   n: number
@@ -25,8 +23,8 @@ function neighbors(city: CityMap, node: Intersection): Intersection[] {
   return city.intersections.filter((o) => Math.abs(o.i - node.i) + Math.abs(o.j - node.j) === 1)
 }
 
-/** 回溯法找一條長度為 segments、不重複經過路口的路線 */
-function selfAvoidingWalk(city: CityMap, rng: Rng, segments: number): Intersection[] {
+/** 回溯法找一條長度為 segments、不重複經過路口的路線；第一段不走 blocked 這條南北向道路 */
+function selfAvoidingWalk(city: CityMap, rng: Rng, segments: number, blocked: number): Intersection[] {
   const path: Intersection[] = []
   const used = new Set<string>()
   const extend = (node: Intersection): boolean => {
@@ -34,7 +32,8 @@ function selfAvoidingWalk(city: CityMap, rng: Rng, segments: number): Intersecti
     used.add(node.id)
     if (path.length === segments + 1) return true
     for (const next of shuffle(neighbors(city, node), rng)) {
-      if (!used.has(next.id) && extend(next)) return true
+      const onBlocked = path.length === 1 && node.x === blocked && next.x === blocked
+      if (!used.has(next.id) && !onBlocked && extend(next)) return true
     }
     path.pop()
     used.delete(node.id)
@@ -57,21 +56,15 @@ function headingOf(d: Vec2): number {
 
 function buildGrid(a: Vec2, b: Vec2): Pose[] {
   const d = unit(a, b)
-  const right = { x: -d.z, z: d.x }
-  const grid: Pose[] = []
-  for (const along of GRID_ROWS) {
-    for (const side of GRID_COLUMNS) {
-      grid.push({ pos: { x: a.x + d.x * along + right.x * side, z: a.z + d.z * along + right.z * side }, heading: headingOf(d) })
-    }
-  }
-  return grid
+  return GRID_ALONG.map((along) => ({ pos: { x: a.x + d.x * along, z: a.z + d.z * along }, heading: headingOf(d) }))
 }
 
 /** 同一座城（同一個 seed）與局數一定產生同一條賽道 */
 export function generateCourse(city: CityMap, n: number): Course {
   const rng = createRng(hashSeed(city.seed, 7, n))
   const segments = CHECKPOINT_EVERY * rng.int(MIN_CHECKPOINTS, MAX_CHECKPOINTS)
-  const nodes = selfAvoidingWalk(city, rng, segments).map((x) => ({ x: x.x, z: x.z }))
+  const mrtRoad = city.roads.find((r) => r.id === city.mrt.roadId)!
+  const nodes = selfAvoidingWalk(city, rng, segments, mrtRoad.center).map((x) => ({ x: x.x, z: x.z }))
   const checkpoints = Array.from({ length: segments / CHECKPOINT_EVERY }, (_, k) => CHECKPOINT_EVERY * (k + 1))
   return { n, nodes, checkpoints, grid: buildGrid(nodes[0]!, nodes[1]!) }
 }

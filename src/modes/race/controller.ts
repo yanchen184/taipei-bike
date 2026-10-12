@@ -74,7 +74,8 @@ export interface RaceControllerOptions {
 interface Round {
   meta: RaceMeta
   course: Course
-  slot: number
+  /** 自己的起跑格；開賽後才加入、不參賽時為 null */
+  slot: number | null
   cp: number
   fin?: number
   /** 伺服器已確認的檢查點數 */
@@ -87,6 +88,8 @@ interface Round {
   aiLive: boolean
   aiClock: number
   aiSentAt: number
+  /** AI 有伺服器還沒確認的變動 */
+  aiDirty: boolean
 }
 
 const IDLE_VIEW: RaceView = {
@@ -148,6 +151,9 @@ export class RaceController {
   private aiSamples = new Map<string, readonly AiSample[]>()
   private active = false
   private sending = false
+  private sendingAi = false
+  /** 開新一局等待伺服器確認中；這段期間寫入比賽資料會讓開局的 transaction 中止 */
+  private starting = false
   private current: RaceView = IDLE_VIEW
   private readonly listeners = new Set<() => void>()
 
@@ -158,15 +164,25 @@ export class RaceController {
     afterStep: (state, dt) => this.afterStep(state, dt),
   }
 
+  /** 不在競速模式時仍要推進：房主繼續算 AI、上傳進度、接手 AI；不參賽的人成為房主時也靠它推進 AI */
+  private readonly background: EngineHooks = {
+    afterStep: (state, dt) => this.afterStep(state, dt),
+  }
+
   constructor(options: RaceControllerOptions) {
     this.options = options
     this.engine = options.engine
     this.link = options.link
   }
 
-  /** 開始監聽比賽資料，回傳停止函式 */
+  /** 開始監聽比賽資料，回傳停止函式；停止時不在競速模式就一併拿掉背景掛點 */
   connect(): () => void {
-    return this.link.watch((snap) => this.onSnapshot(snap))
+    if (!this.active) this.engine.setHooks(this.background)
+    const stop = this.link.watch((snap) => this.onSnapshot(snap))
+    return () => {
+      stop()
+      if (!this.active) this.engine.setHooks(null)
+    }
   }
 
   view = (): RaceView => this.current
@@ -191,14 +207,16 @@ export class RaceController {
     return this.round?.slot ?? null
   }
 
-  /** 房主開新的一局 */
+  /** 房主開新的一局；上一次開局還在等伺服器確認時不做事 */
   async start(ai: number): Promise<void> {
-    const n = (this.snap.meta?.n ?? 0) + 1
-    const course = generateCourse(this.engine.city, n)
+    if (this.starting) return
+    this.starting = true
     try {
-      await this.link.start(Math.min(ai, this.aiLimit()), course.checkpoints.length)
+      await this.link.start(Math.min(ai, this.aiLimit()), (n) => generateCourse(this.engine.city, n).checkpoints.length)
     } catch (error: unknown) {
       this.report(error)
+    } finally {
+      this.starting = false
     }
   }
 
@@ -217,13 +235,13 @@ export class RaceController {
     this.active = true
     this.engine.setHooks(this.hooks)
     const r = this.round
-    if (r) this.engine.mountBike(respawnPose(r.course, r.cp, r.slot))
+    if (r && r.slot !== null) this.engine.mountBike(respawnPose(r.course, r.cp, r.slot))
   }
 
-  /** 競速模式的 onExit：清掉掛點，下車站在腳踏車旁 */
+  /** 競速模式的 onExit：只留背景掛點，下車站在腳踏車旁 */
   exit(): void {
     this.active = false
-    this.engine.setHooks(null)
+    this.engine.setHooks(this.background)
     this.engine.dismountBike()
   }
 
@@ -269,7 +287,8 @@ export class RaceController {
   private onSnapshot(snap: RaceSnapshot): void {
     this.snap = snap
     const meta = snap.meta
-    if (meta && meta.n !== this.round?.meta.n && this.link.selfId in meta.entrants) this.beginRound(meta)
+    if (!meta && this.round) this.dropRound()
+    else if (meta && meta.n !== this.round?.meta.n) this.beginRound(meta)
     else if (meta && this.round && meta.n === this.round.meta.n && meta.at !== this.round.meta.at) this.round = { ...this.round, meta }
     this.recordAiSamples()
     this.refresh()
@@ -289,10 +308,17 @@ export class RaceController {
     }
   }
 
+  /** 比賽被刪除：回到城市 */
+  private dropRound(): void {
+    this.round = null
+    this.aiSamples = new Map()
+    if (this.active) this.options.switchMode(false)
+  }
+
   private beginRound(meta: RaceMeta): void {
     const course = generateCourse(this.engine.city, meta.n)
-    const slot = meta.entrants[this.link.selfId]!
-    const slots = aiSlots(meta)
+    const slot = meta.entrants[this.link.selfId] ?? null
+    const host = this.link.isHost()
     this.aiSamples = new Map()
     this.round = {
       meta,
@@ -301,13 +327,16 @@ export class RaceController {
       cp: 0,
       sentCp: 0,
       stopped: false,
-      ais: slots.map((s) => createAi(course, s)),
-      aiFin: slots.map(() => undefined),
-      aiLive: this.link.isHost(),
+      ...this.syncedAis(meta, course),
+      aiLive: host,
       aiClock: 0,
       aiSentAt: -Infinity,
+      // 倒數期間 AI 不動，先送一次起跑格上的位置讓其他人畫出來
+      aiDirty: host,
     }
-    if (this.active) this.engine.mountBike(course.grid[slot]!)
+    if (slot === null) {
+      if (this.active) this.options.switchMode(false)
+    } else if (this.active) this.engine.mountBike(course.grid[slot]!)
     else this.options.switchMode(true)
   }
 
@@ -324,7 +353,7 @@ export class RaceController {
   private handleAction(action: Action): boolean {
     const r = this.round
     if (action === 'reset') {
-      if (r && this.canRide()) this.engine.mountBike(respawnPose(r.course, r.cp, r.slot))
+      if (r && r.slot !== null && this.canRide()) this.engine.mountBike(respawnPose(r.course, r.cp, r.slot))
       return true
     }
     return BLOCKED_ACTIONS.includes(action)
@@ -335,7 +364,18 @@ export class RaceController {
     if (!r) return
     const now = this.link.serverNow()
     const phase = this.phase(now)
-    const p = state.player
+    if (this.active) this.rideStep(r, state.player, phase, now)
+    this.sendProgress()
+    this.takeOverAis()
+    if (this.simulatingAis(this.round!)) {
+      if (phase === 'racing') this.stepAis(state, dt, now)
+      this.sendAis(now)
+    }
+    this.refresh(now)
+  }
+
+  /** 自己在競速模式中騎車：判斷檢查點，完成或比賽結束後停車 */
+  private rideStep(r: Round, p: GameState['player'], phase: RacePhase, now: number): void {
     if (phase === 'racing' && r.fin === undefined && p.mode === 'bike') {
       const cp = advanceCheckpoint(r.course, r.cp, p.pos)
       if (cp !== r.cp) this.round = { ...r, cp, fin: cp === r.course.checkpoints.length ? now : undefined }
@@ -345,10 +385,6 @@ export class RaceController {
       this.round = { ...this.round!, stopped: true }
       this.engine.mountBike({ pos: p.pos, heading: p.heading })
     }
-    this.sendProgress()
-    this.takeOverAis()
-    if (phase === 'racing' && this.simulatingAis(this.round!)) this.stepAis(state, dt, now)
-    this.refresh(now)
   }
 
   /** 成為房主時從最後同步的 AI 資料接手推進；不再是房主時停止推進 */
@@ -360,24 +396,29 @@ export class RaceController {
       this.round = { ...r, aiLive: false }
       return
     }
-    const slots = aiSlots(r.meta)
+    this.round = { ...r, ...this.syncedAis(r.meta, r.course), aiLive: true, aiClock: 0, aiDirty: true }
+  }
+
+  /** 從最後同步的 AI 資料還原；沒有本局資料的 AI 放在起跑格 */
+  private syncedAis(meta: RaceMeta, course: Course): Pick<Round, 'ais' | 'aiFin'> {
+    const slots = aiSlots(meta)
     const synced = slots.map((_, k) => {
       const a = this.snap.ai[String(k)]
-      return a?.n === r.meta.n ? a : undefined
+      return a?.n === meta.n ? a : undefined
     })
     const ais = slots.map((s, k): AiRider => {
       const a = synced[k]
-      if (!a) return createAi(r.course, s)
+      if (!a) return createAi(course, s)
       const pos = { x: a.x, z: a.z }
       return { bike: { pos, heading: a.h, speed: a.s }, wp: a.w, cp: a.cp, anchor: pos, still: 0, fin: a.fin !== undefined }
     })
-    this.round = { ...r, ais, aiFin: synced.map((a) => a?.fin), aiLive: true, aiClock: 0 }
+    return { ais, aiFin: synced.map((a) => a?.fin) }
   }
 
-  /** 依序上傳：一次只送一筆，每筆比伺服器已確認的多一個檢查點 */
+  /** 依序上傳：一次只送一筆，每筆比伺服器已確認的多一個檢查點；開新一局等待確認時暫停 */
   private sendProgress(): void {
     const r = this.round
-    if (!r || this.sending || r.sentCp >= r.cp) return
+    if (!r || this.starting || this.sending || r.sentCp >= r.cp) return
     const cp = r.sentCp + 1
     const last = cp === r.course.checkpoints.length
     this.sending = true
@@ -394,7 +435,8 @@ export class RaceController {
 
   private stepAis(state: GameState, dt: number, now: number): void {
     const r = this.round!
-    const humans = [{ pos: state.player.pos, fin: r.fin !== undefined }, ...this.otherRacers()]
+    const self = this.active ? [{ pos: state.player.pos, fin: r.fin !== undefined }] : []
+    const humans = [...self, ...this.otherRacers()]
     const traffic = this.engine.trafficObstacles()
     let ais = r.ais
     const aiFin = [...r.aiFin]
@@ -408,12 +450,16 @@ export class RaceController {
         return next
       })
     }
-    const send = now - r.aiSentAt >= AI_SEND_MS
-    this.round = { ...r, ais, aiFin, aiClock: clock, aiSentAt: send ? now : r.aiSentAt }
-    if (!send) return
+    this.round = { ...r, ais, aiFin, aiClock: clock, aiDirty: true }
+  }
+
+  /** 一次只送一筆、間隔至少 AI_SEND_MS；送出的是當下最新的 AI，失敗時下次重送；開新一局等待確認時暫停 */
+  private sendAis(now: number): void {
+    const r = this.round!
+    if (!r.aiDirty || this.starting || this.sendingAi || now - r.aiSentAt < AI_SEND_MS) return
     const net: Record<string, AiNet> = {}
-    ais.forEach((a, k) => {
-      const fin = aiFin[k]
+    r.ais.forEach((a, k) => {
+      const fin = r.aiFin[k]
       net[String(k)] = {
         n: r.meta.n,
         x: a.bike.pos.x,
@@ -425,7 +471,17 @@ export class RaceController {
         ...(fin === undefined ? {} : { fin }),
       }
     })
-    this.link.sendAi(net).catch((error: unknown) => this.report(error))
+    this.round = { ...r, aiDirty: false, aiSentAt: now }
+    this.sendingAi = true
+    this.link
+      .sendAi(net)
+      .catch((error: unknown) => {
+        if (this.round?.meta.n === r.meta.n) this.round = { ...this.round, aiDirty: true }
+        this.report(error)
+      })
+      .finally(() => {
+        this.sendingAi = false
+      })
   }
 
   /** 仍在房內的參賽玩家與 AI */

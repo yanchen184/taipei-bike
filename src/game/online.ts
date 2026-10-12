@@ -31,8 +31,8 @@ export interface RoomHandlers {
 export interface RaceChannel {
   /** 開始監聽，回傳停止函式 */
   watch(onChange: (snap: RaceSnapshot) => void, onError: (error: Error) => void): () => void
-  /** 開新的一局；entrants：uid → 起跑格 */
-  start(ai: number, cps: number, entrants: Record<string, number>): Promise<void>
+  /** 開新的一局；cpsOf：第 n 局的檢查點數，entrants：uid → 起跑格 */
+  start(ai: number, cpsOf: (n: number) => number, entrants: Record<string, number>): Promise<void>
   sendProgress(p: Progress): Promise<void>
   sendAi(ai: Readonly<Record<string, AiNet>>): Promise<void>
 }

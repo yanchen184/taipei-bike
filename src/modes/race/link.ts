@@ -25,8 +25,8 @@ export interface RaceLink {
   subscribeRoster(listener: () => void): () => void
   /** 開始監聽：取得目前內容與之後每次變動都呼叫 onChange，回傳停止函式 */
   watch(onChange: (snap: RaceSnapshot) => void): () => void
-  /** 房主開新的一局：局數加一，房內玩家依加入先後排起跑格 */
-  start(ai: number, cps: number): Promise<void>
+  /** 房主開新的一局：局數加一，房內玩家依加入先後排起跑格；cpsOf：第 n 局的檢查點數 */
+  start(ai: number, cpsOf: (n: number) => number): Promise<void>
   sendProgress(p: Progress): Promise<void>
   sendAi(ai: Record<string, AiNet>): Promise<void>
 }
@@ -44,7 +44,7 @@ export function onlineRaceLink(session: OnlineSession): RaceLink {
     roster,
     subscribeRoster: store.subscribe,
     watch: (onChange) => link.race.watch(onChange, (error) => store.setError(error.message)),
-    start: (ai, cps) => link.race.start(ai, cps, Object.fromEntries(roster().map((e, k) => [e.id, k]))),
+    start: (ai, cpsOf) => link.race.start(ai, cpsOf, Object.fromEntries(roster().map((e, k) => [e.id, k]))),
     sendProgress: (p) => link.race.sendProgress(p),
     sendAi: (ai) => link.race.sendAi(ai),
   }
@@ -69,8 +69,9 @@ export function localRaceLink(selfId: string, name: string, now: () => number = 
       onChange(snap)
       return () => listeners.delete(onChange)
     },
-    async start(ai, cps) {
-      const meta: RaceMeta = { n: (snap.meta?.n ?? 0) + 1, ai, cps, at: now(), entrants: { [selfId]: 0 } }
+    async start(ai, cpsOf) {
+      const n = (snap.meta?.n ?? 0) + 1
+      const meta: RaceMeta = { n, ai, cps: cpsOf(n), at: now(), entrants: { [selfId]: 0 } }
       publish({ meta, progress: {}, ai: {} })
     },
     async sendProgress(p) {

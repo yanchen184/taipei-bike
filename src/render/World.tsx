@@ -52,7 +52,8 @@ interface WorldProps {
 export function World({ keyboard, ModeScene, onScene }: WorldProps) {
   const { homeId } = useHud()
   return (
-    <Canvas camera={{ fov: 60, near: 0.1, far: 1500 }} dpr={[1, 2]} data-testid="world" onCreated={({ scene }) => onScene(scene)}>
+    // isolate：名牌的 z-index 只在畫面內比較，不會蓋住介面
+    <Canvas className="isolate" camera={{ fov: 60, near: 0.1, far: 1500 }} dpr={[1, 2]} data-testid="world" onCreated={({ scene }) => onScene(scene)}>
       <GameLoop keyboard={keyboard} />
       <Atmosphere />
       <CameraRig />

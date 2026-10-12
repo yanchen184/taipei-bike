@@ -65,7 +65,7 @@ function RemotePlayer({ online, uid, name, color, labelRoot }: RemotePlayerProps
       <group ref={avatar}>
         <AvatarModel color={color} />
       </group>
-      <group ref={bike} visible={false}>
+      <group ref={bike} name={`remote-bike-${uid}`} visible={false}>
         <BikeModel />
         <BikeRider color={color} />
       </group>

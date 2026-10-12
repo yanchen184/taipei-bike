@@ -55,10 +55,23 @@ async function finish(page: Page): Promise<void> {
   }
 }
 
+/** page 場景中畫出來的物件位置；沒畫出來時為 null */
+function shown(page: Page, name: string) {
+  return page.evaluate((n) => window.__taipei!.shown(n), name)
+}
+
 /** page 畫面上另一位玩家的模式與位置 */
 async function remote(page: Page, name: string) {
   const all = await page.evaluate(() => window.__taipei!.remotes())
   return all.find((r) => r.name === name) ?? null
+}
+
+/** page 場景中真的畫出這位玩家的腳踏車，位置與同步資料一致 */
+async function expectBikeShown(page: Page, name: string): Promise<void> {
+  const them = (await remote(page, name))!
+  const bike = await shown(page, `remote-bike-${them.uid}`)
+  expect(bike).not.toBeNull()
+  expect(distance(bike!, them)).toBeLessThan(2)
 }
 
 test.describe('G1 開賽（連線）', () => {
@@ -86,6 +99,9 @@ test.describe('N1 比賽同步（兩個 browser context）', () => {
     expect(new Set([mine.slot, theirs.slot]).size).toBe(2)
     await expect.poll(async () => (await remote(guest, '阿明'))?.mode).toBe('bike')
     await expect.poll(async () => (await remote(page, '小美'))?.mode).toBe('bike')
+    // 場景中真的畫出對方的腳踏車，位置與同步資料一致
+    await expectBikeShown(guest, '阿明')
+    await expectBikeShown(page, '小美')
     await page.screenshot({ path: testInfo.outputPath('host-racing.png') })
 
     await finish(page)
@@ -102,20 +118,39 @@ test.describe('N1 比賽同步（兩個 browser context）', () => {
     expect(hostRows).toHaveLength(2)
     expect(hostRows[0]).toContain('阿明')
     expect(hostRows[1]).toContain('小美')
+
+    // 把對方的名牌移到成績表正中央（同一個 task 內，下一幀才會被改回），成績表要畫在名牌上面
+    const box = (await guest.getByTestId('race-results').boundingBox())!
+    const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+    const onTop = await guest.getByTestId('remote-name').filter({ hasText: '阿明' }).evaluate((el, c) => {
+      let wrapper = el as HTMLElement
+      while (wrapper.parentElement && !wrapper.style.zIndex) wrapper = wrapper.parentElement
+      const before = el.getBoundingClientRect()
+      wrapper.style.transform = `translate3d(${c.x - before.width / 2}px, ${c.y - before.height / 2}px, 0)`
+      el.style.pointerEvents = 'auto'
+      const r = el.getBoundingClientRect()
+      const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+      return { overlaps: Math.abs(r.x + r.width / 2 - c.x) < 40 && Math.abs(r.y + r.height / 2 - c.y) < 40, top: hit?.closest('[data-testid]')?.getAttribute('data-testid') }
+    }, center)
+    expect(onTop.overlaps).toBe(true)
+    expect(onTop.top).not.toBe('remote-name')
   })
 
   test('[N1-2] 其他人畫面上的 AI 跟著房主寫入的位置移動', async ({ page, guest }) => {
     await roomOfTwo(page, guest)
     await startRace(page, 2, [page, guest])
-    const start = (await currentRace(guest)).ais
-    expect(start).toHaveLength(2)
+    // 讀場景中真的畫出來的 AI，而不是控制器算出的位置
+    const drawn = (p: Page) => Promise.all([0, 1].map((k) => shown(p, `race-ai-${k}`)))
+    const start = await drawn(guest)
+    expect(start.every((a) => a !== null)).toBe(true)
 
     // 房主的 AI 每 AI_SEND_MS 送一次，其他人再落後 INTERP_DELAY 內插
     await expect
       .poll(async () => {
-        const [h, g] = await Promise.all([currentRace(page), currentRace(guest)])
-        const moved = g.ais.every((a, k) => distance(a, start[k]!) > 5)
-        const gap = Math.max(...g.ais.map((a, k) => distance(a, h.ais[k]!)))
+        const [h, g] = await Promise.all([currentRace(page), drawn(guest)])
+        if (g.some((a) => a === null)) return false
+        const moved = g.every((a, k) => distance(a!, start[k]!) > 5)
+        const gap = Math.max(...g.map((a, k) => distance(a!, h.ais[k]!)))
         return moved && gap < 6
       }, { timeout: 20_000 })
       .toBe(true)
@@ -127,8 +162,11 @@ test.describe('N1 比賽同步（兩個 browser context）', () => {
     await joinRoom(late, '阿花', code)
     await expect(late.getByTestId('race-lobby')).toBeVisible()
     expect(await race(late)).toBeNull()
-    await expect.poll(async () => (await remote(late, '阿明'))?.mode).toBe('bike')
-    await expect.poll(async () => (await remote(late, '小美'))?.mode).toBe('bike')
+    // 第三個畫面的場景要等貼圖載入完才畫出其他玩家
+    for (const name of ['阿明', '小美']) {
+      await expect.poll(async () => (await remote(late, name))?.mode, { timeout: 20_000 }).toBe('bike')
+      await expectBikeShown(late, name)
+    }
     expect((await currentRace(page)).view.total).toBe(2)
   })
 })

@@ -1,4 +1,4 @@
-import { get, onValue, ref, serverTimestamp, set, update, type Database } from 'firebase/database'
+import { onValue, ref, runTransaction, serverTimestamp, set, update, type Database } from 'firebase/database'
 import type { RaceChannel } from '../game/online'
 import { EMPTY_RACE, type RaceSnapshot } from '../modes/race/link'
 import type { AiNet, Progress, RaceMeta } from '../sim/race'
@@ -32,9 +32,17 @@ export function createRaceChannel(db: Database, roomPath: string, uid: string): 
       )
     },
 
-    async start(ai, cps, entrants) {
-      const n = ((await get(ref(db, `${roomPath}/race/meta/n`))).val() as number | null) ?? 0
-      await set(raceRef, { meta: { n: n + 1, ai, cps, at: serverTimestamp(), entrants } })
+    // 伺服器確認前不在本機套用，被規則拒絕時其他畫面與自己都不會出現這一局；
+    // 重試時局數可能改變，檢查點數跟著這次讀到的局數算
+    async start(ai, cpsOf, entrants) {
+      await runTransaction(
+        raceRef,
+        (node: RaceNode | null) => {
+          const n = (node?.meta?.n ?? 0) + 1
+          return { meta: { n, ai, cps: cpsOf(n), at: serverTimestamp(), entrants } }
+        },
+        { applyLocally: false },
+      )
     },
 
     sendProgress({ n, cp, fin }) {

@@ -53,22 +53,50 @@ describe('N1 比賽同步', () => {
     await until(() => watcher.seen.snap !== null)
     expect(watcher.seen.snap).toEqual({ meta: null, progress: {}, ai: {} })
 
-    await host.race.start(2, 6, { [host.uid]: 0, [guest.uid]: 1 })
+    await host.race.start(2, () => 6, { [host.uid]: 0, [guest.uid]: 1 })
     await until(() => watcher.seen.snap?.meta?.n === 1)
     const meta = watcher.seen.snap!.meta!
     expect(meta).toMatchObject({ n: 1, ai: 2, cps: 6, entrants: { [host.uid]: 0, [guest.uid]: 1 } })
     expect(Math.abs(meta.at - Date.now())).toBeLessThan(60_000)
 
-    await host.race.start(0, 7, { [host.uid]: 0 })
+    await host.race.start(0, () => 7, { [host.uid]: 0 })
     await until(() => watcher.seen.snap?.meta?.n === 2)
     expect(watcher.seen.snap!.meta).toMatchObject({ ai: 0, cps: 7, entrants: { [host.uid]: 0 } })
     expect(watcher.seen.errors).toEqual([])
     watcher.stop()
   })
 
+  test('[G1-4] 開新一局的檢查點數依伺服器上實際的局數計算', async () => {
+    const { host, guest } = await twoPlayers()
+    await host.race.start(0, () => 6, { [host.uid]: 0 })
+    const watcher = observe(guest)
+    await until(() => watcher.seen.snap?.meta?.n === 1)
+
+    await host.race.start(0, (n) => (n === 2 ? 8 : 7), { [host.uid]: 0 })
+    await until(() => watcher.seen.snap?.meta?.n === 2)
+    expect(watcher.seen.snap!.meta).toMatchObject({ n: 2, cps: 8 })
+    watcher.stop()
+  })
+
+  test('[G1-4] 開新一局被伺服器拒絕時，本機不會先出現那一局', async () => {
+    const { host, guest } = await twoPlayers()
+    await host.race.start(1, () => 6, { [host.uid]: 0, [guest.uid]: 1 })
+    const rounds: (number | undefined)[] = []
+    const stop = guest.race.watch(
+      (snap) => rounds.push(snap.meta?.n),
+      () => undefined,
+    )
+    await until(() => rounds.includes(1))
+
+    await expect(guest.race.start(0, () => 6, { [guest.uid]: 0 })).rejects.toThrow()
+    await new Promise((r) => setTimeout(r, 300))
+    expect(rounds.every((n) => n === 1)).toBe(true)
+    stop()
+  })
+
   test('[N1-2] 房主寫入的 AI 位置與玩家的進度，其他人都收得到；非房主不能寫 AI', async () => {
     const { host, guest } = await twoPlayers()
-    await host.race.start(2, 6, { [host.uid]: 0, [guest.uid]: 1 })
+    await host.race.start(2, () => 6, { [host.uid]: 0, [guest.uid]: 1 })
     const watcher = observe(guest)
     await until(() => watcher.seen.snap?.meta?.n === 1)
 
