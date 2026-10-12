@@ -142,8 +142,169 @@ taipeiBike/rooms/{code}/
 
 ### 已知限制
 
-位置由客戶端自己回報，玩家可以用開發者工具假造位置。Phase 1 沒有勝負，不做伺服器端驗證；Phase 2 比賽計時如果需要防作弊，要另外設計。
+位置由客戶端自己回報，玩家可以用開發者工具假造位置。Phase 1 沒有勝負，不做伺服器端驗證；Phase 2 的處理見下方「已知限制（Phase 2）」。
 
 ## 測試掛鉤
 
 開發環境，或網址帶 `?debug=1` 時，`window.__taipei` 提供：讀目前狀態、瞬移、設定世界時間、取得某戶大門位置。E2E 與線上驗收透過它定位與檢查狀態，不靠畫面像素判斷位置。
+
+## Phase 2：腳踏車競速
+
+規則見 [00-rules.md](00-rules.md) §8–§11，節點見 [01-flow.md](01-flow.md) 的 B／K／A／G／N。
+
+### 新增與修改的模組
+
+```
+src/
+  sim/
+    vehicle.ts      VehicleState、VehicleSpec（CAR_SPEC、BIKE_SPEC）、moveVehicle：汽車與腳踏車共用的加減速、轉向、碰撞反彈
+    player.ts       PlayerState 加上 mode 'bike' 與 bike；mountBike、dismountBike
+    course.ts       generateCourse(city, n)、檢查點判定、重生位置（§9）
+    ai.ts           AI 的輸入、推進、卡住處理（§10）
+    race.ts         倒數、名次、比賽結束判定（§8、§11）
+  modes/race/
+    link.ts         RaceLink 介面＋單人用的本機實作
+    controller.ts   RaceController：一局比賽的狀態、房主算 AI、切換模式
+    index.ts        createRaceMode(controller): GameMode
+    RaceScene.tsx   檢查點標示、AI 腳踏車
+    RaceHud.tsx     倒數、檢查點 x / N、時間、名次、成績表、退出比賽
+    RaceLobby.tsx   自由逛街時的開賽面板
+  net/race.ts       RaceLink 的 Realtime Database 實作
+  game/engine.ts    加上 EngineHooks 掛點
+```
+
+`sim/city.ts` 不改。
+
+### 腳踏車
+
+- `PlayerState.mode` 多一個 `'bike'`，`PlayerState.bike: VehicleState` 是比賽用的腳踏車；騎車時 `pos`／`heading` 跟著腳踏車。
+- 汽車與腳踏車共用 `moveVehicle`，差別只在 `VehicleSpec`（`CAR_SPEC`、`BIKE_SPEC`）：
+
+| | 半徑 | 最高速 | 倒退最高 | 加速 | 煞車 | 滑行減速 | 轉向 |
+|---|---|---|---|---|---|---|---|
+| 汽車 | 1.6 m | 22 m/s | 6 m/s | 7 | 14 | 2.5 | 1.7 rad/s |
+| 腳踏車 | 0.6 m | 12 m/s | 3 m/s | 4 | 10 | 1 | 2.2 rad/s |
+
+- `mountBike(state, pose)`：放到起跑格或重生點、速度 0、地點設為戶外。`dismountBike(state, city)`：用下車的同一套找空位邏輯，車子不動。
+
+### 賽道
+
+```ts
+interface Course {
+  n: number              // 局數
+  nodes: Vec2[]          // 依序經過的路口中心，nodes[0] 是起點
+  checkpoints: number[]  // 檢查點是 nodes 的第 2、4、6…個，最後一個是終點
+  grid: Pose[]           // 6 個起跑格
+}
+```
+
+- 亂數 seed 是 `hashSeed(city.seed, 7, n)`（城市與房間共用同一個 seed）。先決定總段數 12–16（偶數），再從隨機路口出發，用回溯法走不重複的相鄰路口（5×5 路口格），鄰居順序由亂數決定。
+- 起跑格在第一段路上、離起點路口 4–14 m，兩欄（路中線左右各 3 m）× 三排，朝向第二個路口。
+- 檢查點判定只看「下一個」檢查點：距離 ≤ 8 m 就加一。
+- 重生位置：最後通過的檢查點所在路口中心，朝向下一個路口；還沒通過檢查點時回自己的起跑格。
+
+### AI
+
+```ts
+interface AiRider {
+  bike: VehicleState
+  wp: number     // 下一個要去的 nodes 索引
+  cp: number     // 已通過的檢查點數
+  anchor: Vec2   // 卡住判定的參考點
+  still: number  // 離 anchor 不到 3 m 的累計秒數，滿 3 秒就重生
+  fin: boolean
+}
+```
+
+- 路線：與路段平行、離路中線一段距離的直線。依序試行進方向右側 7 m（路邊）、路中線 0 m，取前方 1–12 m 內沒被擋到的第一條；擋到的判定是線段離障礙物圓或建築物的距離小於腳踏車半徑 + 0.3 m。都被擋時走右側 7 m。
+- 檢查點路口進入前 20 m 內、離開後 10 m 內固定走路中線，確保經過檢查點 8 m 內。
+- 目標點：自己在路線上的位置再往前 6 m，不超過這一段與下一段路線的交點。
+- 離交點不到 2 m 時換下一個路口。
+- 轉向輸入 = −朝向誤差 × 2.5，限制在 ±1。距離交點 20 m 內且要轉彎時，目標速度降到 6 m/s。
+- 碰撞圓用 `riderCircles` 產生：已完賽的選手不產生碰撞圓。
+- 第 k 台（0 起算）最高速 `8.5 + 0.7k` m/s。
+- 只用固定步長 1/30 秒推進；同樣的起點、賽道、障礙物得到同樣的結果。
+
+### 比賽狀態
+
+```ts
+interface RaceMeta {
+  n: number                         // 局數，每開一局加一
+  ai: number                        // AI 台數
+  cps: number                       // 檢查點數
+  at: number                        // 開賽的伺服器時間；倒數結束 = at + 3000
+  entrants: Record<string, number>  // 參賽玩家 uid → 起跑格
+}
+interface Progress { n: number; cp: number; fin?: number }   // fin = 完成的伺服器時間
+interface AiNet { n: number; x: number; z: number; h: number; s: number; w: number; cp: number; fin?: number }
+```
+
+- 階段由伺服器時間推算：`now < at + 3000` 倒數；之後比賽中；`raceOver` 為真就結束（§11-3）；「第一位完成」用 `firstFinish` 從本局全部進度（含已離開房間的選手）算出。每台電腦各自用校正過的伺服器時間算，不另外寫入狀態。
+- 起跑格：參賽玩家依 `joinedAt` 排 0、1、2…，AI 依序用剩下的格子。
+
+### RaceLink 與 RaceController
+
+```ts
+interface RaceLink {
+  readonly selfId: string
+  serverNow(): number
+  isHost(): boolean
+  /** 參賽玩家（依加入先後）與名字；單人時只有自己 */
+  roster(): readonly { id: string; name: string }[]
+  watch(onChange: (snap: RaceSnapshot) => void): () => void
+  start(ai: number, cps: number): Promise<void>     // 房主開新的一局
+  sendProgress(p: Progress): Promise<void>
+  sendAi(ai: Record<string, AiNet>): Promise<void>
+}
+```
+
+- 單人用 `localRaceLink`：資料放記憶體，時間用 `Date.now()`，自己就是房主。
+- 連線用 `net/race.ts`：讀寫 `race/` 節點，房主沿用 `hostOf`（`joinedAt` 最小）。
+- `RaceController` 一個 session 一個：
+  - 收到新的一局且自己在 `entrants` 裡 → 切到競速模式；按「回到城市」或「退出比賽」→ 切回自由逛街。
+  - 每幀由引擎的 `afterStep` 呼叫：判定自己的檢查點並依序上傳進度；房主推進 AI，每秒至多 10 次上傳 `ai`。
+  - 自己的腳踏車的碰撞圓 = 其他參賽玩家（補間後位置）＋ AI；AI 的碰撞圓 = 其他 AI ＋ 所有參賽玩家 ＋ NPC 車。已完賽的選手都不算在內。
+  - 房主換人時，新房主用最後收到的 `ai` 資料建立 AI 繼續算，`anchor` 設為目前位置、`still` 設為 0。
+  - 非房主畫 AI 時，跟其他玩家一樣保留最近兩筆、落後 100 ms 補間。
+
+### 引擎掛點
+
+```ts
+interface EngineHooks {
+  obstacles?(): readonly Circle[]      // 額外的碰撞圓
+  controls?(): boolean                 // false 時本幀輸入歸零（倒數中、已完成）
+  action?(action: Action): boolean     // 回傳 true 表示已處理，引擎不再處理
+  afterStep?(state: GameState, dt: number): void
+}
+engine.setHooks(hooks | null)
+engine.trafficObstacles(): readonly Circle[]  // 本幀 NPC 車的碰撞圓
+```
+
+競速模式的 `onEnter` 設定掛點並讓玩家騎上腳踏車，`onExit` 清掉掛點並下車。`ModeContext` 加上 `online`。
+
+### Realtime Database
+
+```
+taipeiBike/rooms/{code}/race/
+  meta:     RaceMeta
+  progress: { [uid]: Progress }
+  ai:       { "0"…"4": AiNet }
+```
+
+`states/{uid}.mode` 多一個 `'bike'`；騎車時 `x, z, h` 是腳踏車的位置。
+
+開新的一局：房主一筆寫入整個 `race`，只含新的 `meta`，同時清掉上一局的 `progress` 與 `ai`。
+
+### 安全規則
+
+「房主」在規則裡的寫法：自己在 `players` 內，而且 6 個位子中每個有玩家資料的主人，`joinedAt` 都不小於自己的。同一毫秒加入的兩人都算房主。
+
+- `race`：只有房主能寫，而且寫入後 `progress` 與 `ai` 都不存在（只能開新的一局或刪除整個比賽）。
+- `race/meta`：`n` 是上一局加一（沒有上一局時是 1）；`ai` 0–5；`cps` 6–8；`at` 必須是伺服器時間；`entrants` 的每個 uid 必須在 `players` 內、值 0–5。
+- `race/ai/{k}`：只有房主能寫；k 必須小於 `meta.ai`；`n` 等於目前局數；`fin` 寫入時必須是伺服器時間，之後不能改。
+- `race/progress/{uid}`：只有本人能寫，且本人在 `players` 與 `meta.entrants` 內；`now ≥ at + 3000`；`n` 等於目前局數；`cp` 是上一筆加一（沒有本局資料時是 1），不超過 `cps`；`fin` 只能在 `cp = cps` 時寫入且必須是伺服器時間。
+- 規則不數 `entrants` 人數，玩家加 AI 不超過 6 台由客戶端保證。
+
+### 已知限制（Phase 2）
+
+位置與通過檢查點都由客戶端自己判定，規則只保證「依序、不早於開跑、完成時間是伺服器時間」。改過的客戶端仍可以瞬移通過檢查點；本遊戲是朋友間連線，不做伺服器端驗證。

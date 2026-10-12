@@ -1,6 +1,6 @@
 import { useHud } from '../game/EngineContext'
 
-const MODE_LABEL = { walk: '步行', drive: '開車' } as const
+const MODE_LABEL = { walk: '步行', drive: '開車', bike: '騎車' } as const
 
 const CONTROLS = 'WASD 移動　Shift 跑　E 上下車／進門　Q 叫車　R 扶正　C 視角　H 喇叭　M 手冊　拖曳滑鼠轉視角'
 

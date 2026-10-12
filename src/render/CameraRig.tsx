@@ -7,6 +7,7 @@ import { useEngine } from '../game/EngineContext'
 const CHASE = {
   walk: { distance: 6, height: 3.2, look: 1.4 },
   drive: { distance: 10, height: 4.5, look: 1.2 },
+  bike: { distance: 6, height: 3.2, look: 1.2 },
   indoor: { distance: 4.5, height: 4.5, look: 1 },
 } as const
 const TOP_HEIGHT = 70

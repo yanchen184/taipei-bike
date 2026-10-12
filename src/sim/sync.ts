@@ -28,12 +28,12 @@ export interface RoomPlayer {
   joinedAt: number
 }
 
-/** loc：OUTDOOR 或住家 id */
+/** loc：OUTDOOR 或住家 id；mode 為 bike 時 x/z/h 就是腳踏車的位置與朝向 */
 export interface NetState {
   x: number
   z: number
   h: number
-  mode: 'walk' | 'drive'
+  mode: PlayerState['mode']
   cx: number
   cz: number
   ch: number

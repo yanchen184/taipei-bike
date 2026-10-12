@@ -3,6 +3,7 @@ import { readNightGlow } from '../render/materials'
 import { sceneSurfaces, type SceneSurfaces } from '../render/sceneProbe'
 import { textureStatus } from '../render/textures'
 import { hornPlayCount } from './audio'
+import type { PlayerState } from '../sim/player'
 import type { GameEngine, GameState } from './engine'
 import type { OnlineSession, RosterEntry } from './online'
 
@@ -36,7 +37,7 @@ export interface DebugRemote {
   name: string
   x: number
   z: number
-  mode: 'walk' | 'drive'
+  mode: PlayerState['mode']
   loc: string
 }
 

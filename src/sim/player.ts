@@ -1,26 +1,17 @@
 import { CAR_LANE_OFFSET, ROAD_WIDTH, SIDEWALK, nearestRoadPose } from './city'
 import { isFree, resolveCircle, type Circle } from './collide'
-import type { CityMap, Vec2 } from './types'
+import type { CityMap, Pose, Vec2 } from './types'
+import { BIKE_SPEC, CAR_SPEC, moveVehicle, substeps, type VehicleState } from './vehicle'
 
 export const WALK_SPEED = 4
 export const RUN_SPEED = 7
 export const WALK_RADIUS = 0.35
-export const CAR_RADIUS = 1.6
+export const CAR_RADIUS = CAR_SPEC.radius
 export const ENTER_CAR_DISTANCE = 3
-export const MAX_SPEED = 22
-export const MAX_REVERSE = 6
-const ACCEL = 7
-const BRAKE = 14
-const REVERSE_ACCEL = 4
-const DRAG = 2.5
-const HANDBRAKE = 20
-const TURN_RATE = 1.7
-/** 低於這個速度時轉向率依速度線性縮小，靜止時為 0 */
-const FULL_TURN_SPEED = 6
-const BOUNCE = 0.3
-const EXIT_OFFSET = CAR_RADIUS + WALK_RADIUS + 0.4
-/** 每個子步的最大位移（公尺），小於最薄碰撞物的一半加上角色半徑，所以不會穿過物體 */
-const MAX_SUBSTEP_MOVE = 0.25
+export const MAX_SPEED = CAR_SPEC.maxSpeed
+export const MAX_REVERSE = CAR_SPEC.maxReverse
+/** 下車位置與車身之間的空隙 */
+const EXIT_GAP = 0.4
 /** 開局時計程車從汽車道往路邊移的距離：車身中線離人行道 1 m */
 const SPAWN_CAR_SHIFT = ROAD_WIDTH / 2 - SIDEWALK - 1 - CAR_LANE_OFFSET
 /** 開局時角色從汽車道往路邊移的距離：站在人行道中線 */
@@ -28,17 +19,15 @@ const SPAWN_WALKER_SHIFT = ROAD_WIDTH / 2 - SIDEWALK / 2 - CAR_LANE_OFFSET
 
 export type Location = { kind: 'outdoor' } | { kind: 'home'; homeId: string }
 
-export interface CarState {
-  pos: Vec2
-  heading: number
-  speed: number
-}
+export type CarState = VehicleState
 
+/** drive 時 pos／heading 跟著 car，bike 時跟著 bike */
 export interface PlayerState {
-  mode: 'walk' | 'drive'
+  mode: 'walk' | 'drive' | 'bike'
   pos: Vec2
   heading: number
   car: CarState
+  bike: VehicleState
   location: Location
   odometer: number
 }
@@ -64,6 +53,7 @@ export function createPlayer(city: CityMap): PlayerState {
     pos: towardCurb(SPAWN_WALKER_SHIFT),
     heading: lane.heading,
     car: { pos: towardCurb(SPAWN_CAR_SHIFT), heading: lane.heading, speed: 0 },
+    bike: { pos: towardCurb(SPAWN_CAR_SHIFT), heading: lane.heading, speed: 0 },
     location: { kind: 'outdoor' },
     odometer: 0,
   }
@@ -88,36 +78,20 @@ function stepWalk(state: PlayerState, input: PlayerInput, dt: number, colliders:
   return { ...state, pos, heading: Math.atan2(mx, mz) }
 }
 
-function nextSpeed(speed: number, input: PlayerInput, dt: number): number {
-  const toward = (v: number, target: number, rate: number) =>
-    v > target ? Math.max(target, v - rate * dt) : Math.min(target, v + rate * dt)
-  if (input.handbrake) return toward(speed, 0, HANDBRAKE)
-  if (input.forward > 0) {
-    return speed < 0 ? toward(speed, 0, BRAKE) : Math.min(MAX_SPEED, speed + ACCEL * dt)
-  }
-  if (input.forward < 0) {
-    return speed > 0 ? toward(speed, 0, BRAKE) : Math.max(-MAX_REVERSE, speed - REVERSE_ACCEL * dt)
-  }
-  return toward(speed, 0, DRAG)
+function stepDrive(state: PlayerState, input: PlayerInput, dt: number, city: CityMap, obstacles: readonly Circle[]): PlayerState {
+  const car = moveVehicle(state.car, CAR_SPEC, input, dt, city.colliders, obstacles)
+  return { ...state, pos: car.pos, heading: car.heading, car, odometer: state.odometer + distance(state.car.pos, car.pos) }
 }
 
-function stepDrive(state: PlayerState, input: PlayerInput, dt: number, city: CityMap, obstacles: readonly Circle[]): PlayerState {
-  const speed = nextSpeed(state.car.speed, input, dt)
-  const grip = Math.min(1, Math.abs(speed) / FULL_TURN_SPEED) * Math.sign(speed)
-  const heading = state.car.heading - input.right * TURN_RATE * grip * dt
-  const target = {
-    x: state.car.pos.x + Math.sin(heading) * speed * dt,
-    z: state.car.pos.z + Math.cos(heading) * speed * dt,
-  }
-  const { pos, hit } = resolveCircle(target, CAR_RADIUS, city.colliders, obstacles)
-  const car = { pos, heading, speed: hit ? -speed * BOUNCE : speed }
-  return {
-    ...state,
-    pos,
-    heading,
-    car,
-    odometer: state.odometer + distance(state.car.pos, pos),
-  }
+function stepBike(state: PlayerState, input: PlayerInput, dt: number, city: CityMap, obstacles: readonly Circle[]): PlayerState {
+  const bike = moveVehicle(state.bike, BIKE_SPEC, { ...input, handbrake: false }, dt, city.colliders, obstacles)
+  return { ...state, pos: bike.pos, heading: bike.heading, bike }
+}
+
+const MODE_MAX_SPEED: Record<PlayerState['mode'], number> = {
+  walk: RUN_SPEED,
+  drive: CAR_SPEC.maxSpeed,
+  bike: BIKE_SPEC.maxSpeed,
 }
 
 /** 推進 dt 秒，依最大位移切成子步；室內時 colliders 由呼叫端換成室內的 */
@@ -128,12 +102,13 @@ export function stepPlayer(
   city: CityMap,
   obstacles: readonly Circle[] = [],
 ): PlayerState {
-  const maxMove = (state.mode === 'drive' ? MAX_SPEED : RUN_SPEED) * dt
-  const count = Math.max(1, Math.ceil(maxMove / MAX_SUBSTEP_MOVE))
+  const count = substeps(MODE_MAX_SPEED[state.mode], dt)
   const sub = dt / count
   let s = state
   for (let k = 0; k < count; k++) {
-    s = s.mode === 'drive' ? stepDrive(s, input, sub, city, obstacles) : stepWalk(s, input, sub, city.colliders)
+    if (s.mode === 'drive') s = stepDrive(s, input, sub, city, obstacles)
+    else if (s.mode === 'bike') s = stepBike(s, input, sub, city, obstacles)
+    else s = stepWalk(s, input, sub, city.colliders)
   }
   return s
 }
@@ -147,22 +122,35 @@ export function enterCar(state: PlayerState): PlayerState | null {
   return { ...state, mode: 'drive', pos: state.car.pos, heading: state.car.heading }
 }
 
-/** 依序試車子左、右、後、前，取第一個不會卡進物體的位置 */
-export function exitCar(state: PlayerState, city: CityMap): PlayerState {
-  const h = state.car.heading
-  const car: Circle = { pos: state.car.pos, radius: CAR_RADIUS }
+/** 依序試車身左、右、後、前，取第一個不會卡進物體的位置 */
+function stepOff(state: PlayerState, vehicle: VehicleState, radius: number, city: CityMap): PlayerState {
+  const h = vehicle.heading
+  const body: Circle = { pos: vehicle.pos, radius }
   const angles = [h + Math.PI / 2, h - Math.PI / 2, h + Math.PI, h]
   for (const extra of [0, 1, 2]) {
     for (const a of angles) {
-      const d = EXIT_OFFSET + extra
-      const pos = { x: state.car.pos.x + Math.sin(a) * d, z: state.car.pos.z + Math.cos(a) * d }
-      if (isFree(pos, WALK_RADIUS, city.colliders, [car])) {
-        return { ...state, mode: 'walk', pos, heading: h, car: { ...state.car, speed: 0 } }
-      }
+      const d = radius + WALK_RADIUS + EXIT_GAP + extra
+      const pos = { x: vehicle.pos.x + Math.sin(a) * d, z: vehicle.pos.z + Math.cos(a) * d }
+      if (isFree(pos, WALK_RADIUS, city.colliders, [body])) return { ...state, mode: 'walk', pos, heading: h }
     }
   }
-  const { pos } = resolveCircle(state.car.pos, WALK_RADIUS, city.colliders, [car])
-  return { ...state, mode: 'walk', pos, car: { ...state.car, speed: 0 } }
+  const { pos } = resolveCircle(vehicle.pos, WALK_RADIUS, city.colliders, [body])
+  return { ...state, mode: 'walk', pos }
+}
+
+export function exitCar(state: PlayerState, city: CityMap): PlayerState {
+  return { ...stepOff(state, state.car, CAR_RADIUS, city), car: { ...state.car, speed: 0 } }
+}
+
+/** 騎上腳踏車：放在指定位置、速度 0、地點設為戶外 */
+export function mountBike(state: PlayerState, pose: Pose): PlayerState {
+  const bike = { pos: pose.pos, heading: pose.heading, speed: 0 }
+  return { ...state, mode: 'bike', pos: pose.pos, heading: pose.heading, bike, location: { kind: 'outdoor' } }
+}
+
+export function dismountBike(state: PlayerState, city: CityMap): PlayerState {
+  if (state.mode !== 'bike') return state
+  return { ...stepOff(state, state.bike, BIKE_SPEC.radius, city), bike: { ...state.bike, speed: 0 } }
 }
 
 export function callCar(state: PlayerState, city: CityMap): PlayerState {
