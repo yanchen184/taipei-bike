@@ -2,6 +2,7 @@ import { useFrame } from '@react-three/fiber'
 import { useRef } from 'react'
 import type * as THREE from 'three'
 import { useEngine } from '../game/EngineContext'
+import { BikeModel, BikeRider } from './BikeModel'
 import { glow } from './materials'
 
 const WHEELS: readonly (readonly [number, number])[] = [
@@ -60,11 +61,13 @@ export function AvatarModel({ color = '#2f7de1' }: { color?: string }) {
   )
 }
 
-/** 自己的車與角色；室內時不畫車 */
+/** 自己的車、腳踏車與角色；室內時不畫車 */
 export function PlayerView() {
   const engine = useEngine()
   const car = useRef<THREE.Group>(null)
   const avatar = useRef<THREE.Group>(null)
+  const bike = useRef<THREE.Group>(null)
+  const rider = useRef<THREE.Group>(null)
 
   useFrame(() => {
     const p = engine.state.player
@@ -74,6 +77,14 @@ export function PlayerView() {
       car.current.position.set(p.car.pos.x, 0, p.car.pos.z)
       car.current.rotation.y = p.car.heading
     }
+    if (bike.current) {
+      bike.current.visible = !indoors && p.bike !== null
+      if (p.bike) {
+        bike.current.position.set(p.bike.pos.x, 0, p.bike.pos.z)
+        bike.current.rotation.y = p.bike.heading
+      }
+    }
+    if (rider.current) rider.current.visible = p.mode === 'bike'
     if (avatar.current) {
       avatar.current.visible = p.mode === 'walk'
       avatar.current.position.set(p.pos.x, 0, p.pos.z)
@@ -85,6 +96,12 @@ export function PlayerView() {
     <group>
       <group ref={car} name="player-car">
         <TaxiModel />
+      </group>
+      <group ref={bike} name="player-bike">
+        <BikeModel />
+        <group ref={rider}>
+          <BikeRider />
+        </group>
       </group>
       <group ref={avatar} name="player-avatar">
         <AvatarModel />

@@ -21,13 +21,13 @@ export type Location = { kind: 'outdoor' } | { kind: 'home'; homeId: string }
 
 export type CarState = VehicleState
 
-/** drive 時 pos／heading 跟著 car，bike 時跟著 bike */
+/** drive 時 pos／heading 跟著 car，bike 時跟著 bike；bike 為 null 表示還沒有腳踏車 */
 export interface PlayerState {
   mode: 'walk' | 'drive' | 'bike'
   pos: Vec2
   heading: number
   car: CarState
-  bike: VehicleState
+  bike: VehicleState | null
   location: Location
   odometer: number
 }
@@ -53,7 +53,7 @@ export function createPlayer(city: CityMap): PlayerState {
     pos: towardCurb(SPAWN_WALKER_SHIFT),
     heading: lane.heading,
     car: { pos: towardCurb(SPAWN_CAR_SHIFT), heading: lane.heading, speed: 0 },
-    bike: { pos: towardCurb(SPAWN_CAR_SHIFT), heading: lane.heading, speed: 0 },
+    bike: null,
     location: { kind: 'outdoor' },
     odometer: 0,
   }
@@ -84,6 +84,7 @@ function stepDrive(state: PlayerState, input: PlayerInput, dt: number, city: Cit
 }
 
 function stepBike(state: PlayerState, input: PlayerInput, dt: number, city: CityMap, obstacles: readonly Circle[]): PlayerState {
+  if (!state.bike) return state
   const bike = moveVehicle(state.bike, BIKE_SPEC, { ...input, handbrake: false }, dt, city.colliders, obstacles)
   return { ...state, pos: bike.pos, heading: bike.heading, bike }
 }
@@ -149,7 +150,7 @@ export function mountBike(state: PlayerState, pose: Pose): PlayerState {
 }
 
 export function dismountBike(state: PlayerState, city: CityMap): PlayerState {
-  if (state.mode !== 'bike') return state
+  if (state.mode !== 'bike' || !state.bike) return state
   return { ...stepOff(state, state.bike, BIKE_SPEC.radius, city), bike: { ...state.bike, speed: 0 } }
 }
 

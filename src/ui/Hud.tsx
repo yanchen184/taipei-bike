@@ -15,7 +15,7 @@ export function Hud() {
         <div data-testid="mode">{hud.placeLabel ?? MODE_LABEL[hud.mode]}</div>
         <div data-testid="visited">已拜訪 {hud.visited} 戶</div>
       </div>
-      {hud.mode === 'drive' && (
+      {hud.mode !== 'walk' && (
         <div data-testid="speed" className="pointer-events-none absolute bottom-6 right-6 rounded-xl bg-black/55 px-5 py-3 text-right text-white">
           <span className="text-4xl font-black tabular-nums">{hud.speedKmh}</span>
           <span className="ml-1 text-sm">km/h</span>

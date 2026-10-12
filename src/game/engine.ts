@@ -6,8 +6,10 @@ import {
   callCar,
   canEnterCar,
   createPlayer,
+  dismountBike,
   enterCar,
   exitCar,
+  mountBike,
   resetCar,
   stepPlayer,
   type PlayerInput,
@@ -23,13 +25,14 @@ import {
   type Route,
   type TrafficState,
 } from '../sim/traffic'
-import type { CityMap } from '../sim/types'
+import type { CityMap, Pose } from '../sim/types'
 
 export type CameraMode = 'chase' | 'top'
 export type Action = 'interact' | 'callCar' | 'reset' | 'camera' | 'horn' | 'menu' | 'close'
 
 /** 分頁切回前景時的單幀上限（秒），避免一次推進太久 */
 const MAX_FRAME = 0.1
+const NO_INPUT: Omit<PlayerInput, 'cameraYaw'> = { forward: 0, right: 0, run: false, handbrake: false }
 
 export interface GameState {
   t: number
@@ -55,6 +58,17 @@ export interface HudSnapshot {
   cameraMode: CameraMode
   bookOpen: boolean
   visited: number
+}
+
+/** 玩法模式掛在引擎上的擴充點 */
+export interface EngineHooks {
+  /** 額外的碰撞圓（戶外開車或騎車時才算） */
+  obstacles?(): readonly Circle[]
+  /** 回傳 false 時本幀輸入歸零 */
+  controls?(): boolean
+  /** 回傳 true 表示已處理，引擎不再處理 */
+  action?(action: Action): boolean
+  afterStep?(state: GameState, dt: number): void
 }
 
 export interface Storage {
@@ -90,6 +104,7 @@ export class GameEngine {
   private savedSnapshot: SaveData | null = null
   private interiorCache: { id: string; room: Interior; city: CityMap } | null = null
   private readonly obstacleBuffer: Circle[] = []
+  private hooks: EngineHooks | null = null
 
   constructor(options: EngineOptions) {
     this.options = options
@@ -144,13 +159,19 @@ export class GameEngine {
     const loc = before.location
     const outdoors = loc.kind === 'outdoor'
     const map = loc.kind === 'home' ? this.interiorFor(loc.homeId).city : this.city
-    const obstacles = outdoors && before.mode === 'drive' ? this.npcObstacles(traffic) : []
-    const full: PlayerInput = { ...input, cameraYaw: this.current.cameraYaw }
+    const hooks = this.hooks
+    const riding = outdoors && before.mode !== 'walk'
+    const extra = riding ? (hooks?.obstacles?.() ?? []) : []
+    const npc = riding ? this.npcObstacles(traffic) : []
+    const obstacles = extra.length === 0 ? npc : [...npc, ...extra]
+    const controlled = hooks?.controls?.() ?? true
+    const full: PlayerInput = { ...(controlled ? input : NO_INPUT), cameraYaw: this.current.cameraYaw }
     const player = stepPlayer(before, full, dt, map, obstacles)
 
     const save = { ...this.current.save, odometer: player.odometer }
     this.current = { ...this.current, t, traffic, player, cameraYaw: this.followYaw(player, dt), save }
     this.persist(save)
+    hooks?.afterStep?.(this.current, dt)
     this.emit()
   }
 
@@ -158,7 +179,32 @@ export class GameEngine {
     this.current = { ...this.current, cameraYaw: this.current.cameraYaw + delta }
   }
 
+  setHooks(hooks: EngineHooks | null): void {
+    this.hooks = hooks
+  }
+
+  /** 本幀 NPC 車輛的碰撞圓；下一次 update 會覆寫同一個陣列 */
+  trafficObstacles(): readonly Circle[] {
+    return this.npcObstacles(this.current.traffic)
+  }
+
+  /** 在指定位置騎上腳踏車（速度 0、移到戶外），汽車留在原地 */
+  mountBike(pose: Pose): void {
+    this.setPlayer(mountBike(this.current.player, pose), pose.heading)
+    this.emit()
+  }
+
+  /** 下腳踏車，站在車旁 */
+  dismountBike(): void {
+    this.setPlayer(dismountBike(this.current.player, this.city))
+    this.emit()
+  }
+
   action(action: Action): void {
+    if (this.hooks?.action?.(action)) {
+      this.emit()
+      return
+    }
     const s = this.current
     switch (action) {
       case 'interact':
@@ -189,14 +235,16 @@ export class GameEngine {
     this.emit()
   }
 
-  /** 測試掛鉤用：瞬移玩家（開車時連車一起） */
+  /** 測試掛鉤用：瞬移玩家（開車或騎車時連車一起） */
   teleport(x: number, z: number, heading = this.current.player.heading): void {
     const p = this.current.player
     const pos = { x, z }
     const player: PlayerState =
       p.mode === 'drive'
         ? { ...p, pos, heading, car: { ...p.car, pos, heading, speed: 0 } }
-        : { ...p, pos, heading, location: { kind: 'outdoor' } }
+        : p.mode === 'bike' && p.bike
+          ? { ...p, pos, heading, bike: { ...p.bike, pos, heading, speed: 0 } }
+          : { ...p, pos, heading, location: { kind: 'outdoor' } }
     this.current = { ...this.current, player, cameraYaw: heading }
     this.emit()
   }
@@ -236,8 +284,9 @@ export class GameEngine {
 
   private followYaw(player: PlayerState, dt: number): number {
     const yaw = this.current.cameraYaw
-    if (player.mode !== 'drive' || player.car.speed < 0.5) return yaw
-    let d = (player.car.heading - yaw) % (2 * Math.PI)
+    const vehicle = player.mode === 'drive' ? player.car : player.mode === 'bike' ? player.bike : null
+    if (!vehicle || vehicle.speed < 0.5) return yaw
+    let d = (vehicle.heading - yaw) % (2 * Math.PI)
     if (d > Math.PI) d -= 2 * Math.PI
     if (d < -Math.PI) d += 2 * Math.PI
     return yaw + d * Math.min(1, dt * 4)
@@ -290,7 +339,7 @@ export class GameEngine {
       clock: formatClock(s.t),
       night: isNight(s.t),
       mode: p.mode,
-      speedKmh: Math.round(Math.abs(p.car.speed) * 3.6),
+      speedKmh: Math.round(Math.abs((p.mode === 'bike' ? p.bike?.speed : p.car.speed) ?? 0) * 3.6),
       prompt,
       greeting: greet,
       placeLabel: inside ? inside.home.address : null,

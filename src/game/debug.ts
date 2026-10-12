@@ -3,7 +3,9 @@ import { readNightGlow } from '../render/materials'
 import { sceneSurfaces, type SceneSurfaces } from '../render/sceneProbe'
 import { textureStatus } from '../render/textures'
 import { hornPlayCount } from './audio'
+import type { RaceController, RaceView } from '../modes/race/controller'
 import type { PlayerState } from '../sim/player'
+import type { Pose, Vec2 } from '../sim/types'
 import type { GameEngine, GameState } from './engine'
 import type { OnlineSession, RosterEntry } from './online'
 
@@ -30,6 +32,20 @@ export interface TaipeiDebug {
   remotes(): DebugRemote[]
   /** 房號與房內名單；單人時為 null */
   room(): { code: string; uid: string; seed: number; players: readonly RosterEntry[] } | null
+  /** 目前這一局；還沒有參加過比賽時為 null */
+  race(): DebugRace | null
+  /** 場景中是否有這個名字的物件 */
+  hasObject(name: string): boolean
+}
+
+export interface DebugRace {
+  view: RaceView
+  slot: number
+  grid: Pose[]
+  checkpoints: Vec2[]
+  ais: { x: number; z: number; cp: number; fin: boolean }[]
+  /** 畫面上檢查點標示的位置；沒有畫時為 null */
+  marker: Vec2 | null
 }
 
 export interface DebugRemote {
@@ -57,6 +73,7 @@ export function installDebug(
   engine: GameEngine,
   online: OnlineSession | null,
   scene: THREE.Scene | null,
+  race: RaceController,
 ): () => void {
   target.__taipei = {
     state: () => {
@@ -77,6 +94,21 @@ export function installDebug(
     },
     room: () =>
       online && { code: online.link.code, uid: online.link.uid, seed: online.link.meta.seed, players: online.store.getRoster() },
+    hasObject: (name) => scene?.getObjectByName(name) !== undefined,
+    race: () => {
+      const course = race.course()
+      const slot = race.slot()
+      if (!course || slot === null) return null
+      const marker = scene?.getObjectByName('race-checkpoint')
+      return structuredClone({
+        view: race.view(),
+        slot,
+        grid: course.grid,
+        checkpoints: course.checkpoints.map((k) => course.nodes[k]!),
+        ais: race.aiRiders().map((a) => ({ x: a.pos.x, z: a.pos.z, cp: a.cp, fin: a.fin })),
+        marker: marker ? { x: marker.position.x, z: marker.position.z } : null,
+      })
+    },
   }
   return () => {
     delete target.__taipei

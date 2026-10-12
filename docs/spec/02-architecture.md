@@ -165,7 +165,7 @@ src/
   modes/race/
     link.ts         RaceLink 介面＋單人用的本機實作
     controller.ts   RaceController：一局比賽的狀態、房主算 AI、切換模式
-    index.ts        createRaceMode(controller): GameMode
+    index.tsx       createRaceMode(controller): GameMode；createRace 建立控制器並接上模式切換
     RaceScene.tsx   檢查點標示、AI 腳踏車
     RaceHud.tsx     倒數、檢查點 x / N、時間、名次、成績表、退出比賽
     RaceLobby.tsx   自由逛街時的開賽面板
@@ -177,7 +177,7 @@ src/
 
 ### 腳踏車
 
-- `PlayerState.mode` 多一個 `'bike'`，`PlayerState.bike: VehicleState` 是比賽用的腳踏車；騎車時 `pos`／`heading` 跟著腳踏車。
+- `PlayerState.mode` 多一個 `'bike'`，`PlayerState.bike: VehicleState | null` 是比賽用的腳踏車，第一次開賽前為 `null`；騎車時 `pos`／`heading` 跟著腳踏車。
 - 汽車與腳踏車共用 `moveVehicle`，差別只在 `VehicleSpec`（`CAR_SPEC`、`BIKE_SPEC`）：
 
 | | 半徑 | 最高速 | 倒退最高 | 加速 | 煞車 | 滑行減速 | 轉向 |
@@ -280,7 +280,7 @@ engine.setHooks(hooks | null)
 engine.trafficObstacles(): readonly Circle[]  // 本幀 NPC 車的碰撞圓
 ```
 
-競速模式的 `onEnter` 設定掛點並讓玩家騎上腳踏車，`onExit` 清掉掛點並下車。`ModeContext` 加上 `online`。
+競速模式的 `onEnter` 設定掛點並讓玩家騎上腳踏車，`onExit` 清掉掛點並下車。RaceController 持有 RaceLink，`ModeContext` 不變；其他玩家離下一檢查點的距離用選項 `positionOf(id)` 取得的位置計算，拿不到位置時視為無限遠。
 
 ### Realtime Database
 

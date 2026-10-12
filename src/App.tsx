@@ -7,7 +7,11 @@ import { EngineContext } from './game/EngineContext'
 import { createKeyboard } from './game/input'
 import { OnlineSession } from './game/online'
 import { OnlineContext } from './game/OnlineContext'
+import { freeRoam } from './modes/freeRoam'
 import { createModeManager } from './modes/manager'
+import { createRace } from './modes/race'
+import { localRaceLink } from './modes/race/link'
+import { RaceLobby } from './modes/race/RaceLobby'
 import { useActiveMode } from './modes/useActiveMode'
 import { World } from './render/World'
 import { SAVE_KEY, loadSave } from './sim/save'
@@ -29,10 +33,18 @@ function Game({ engine, online }: Session) {
   const [keyboard] = useState(createKeyboard)
   const [scene, setScene] = useState<THREE.Scene | null>(null)
   const modes = useMemo(() => createModeManager({ engine }), [engine])
+  const race = useMemo(
+    () => createRace(engine, localRaceLink(online?.link.uid ?? 'solo', engine.state.save.name), modes, (e) => online?.store.setError(e.message)),
+    [engine, online, modes],
+  )
   const mode = useActiveMode(modes)
 
   useEffect(() => keyboard.attach(window, (action) => engine.action(action)), [keyboard, engine])
-  useEffect(() => (debugEnabled(window.location) ? installDebug(window, engine, online, scene) : undefined), [engine, online, scene])
+  useEffect(() => race.connect(), [race])
+  useEffect(
+    () => (debugEnabled(window.location) ? installDebug(window, engine, online, scene, race) : undefined),
+    [engine, online, scene, race],
+  )
   useEffect(() => online?.start(() => engine.state.player), [online, engine])
 
   return (
@@ -45,6 +57,7 @@ function Game({ engine, online }: Session) {
           <Hud />
           <RoomPanel />
           <mode.Hud />
+          {mode === freeRoam && <RaceLobby controller={race} />}
           <StampBook />
         </div>
       </OnlineContext.Provider>
