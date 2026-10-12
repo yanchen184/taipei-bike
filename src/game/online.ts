@@ -1,8 +1,12 @@
+import type { RaceSnapshot } from '../modes/race/link'
 import type { PlayerState } from '../sim/player'
+import type { AiNet, Progress } from '../sim/race'
 import {
+  OUTDOOR,
   SEND_INTERVAL,
   createSender,
   hostOf,
+  interpolate,
   pushSample,
   sameNetState,
   toNetState,
@@ -12,6 +16,7 @@ import {
   type RoomMeta,
   type RoomPlayer,
 } from '../sim/sync'
+import type { Vec2 } from '../sim/types'
 
 /** 房間資料變動時由連線層呼叫 */
 export interface RoomHandlers {
@@ -22,11 +27,22 @@ export interface RoomHandlers {
   serverOffset(ms: number): void
 }
 
+/** 房間內的比賽資料；完成時間由伺服器決定，送出的 fin 只表示已完成 */
+export interface RaceChannel {
+  /** 開始監聽，回傳停止函式 */
+  watch(onChange: (snap: RaceSnapshot) => void, onError: (error: Error) => void): () => void
+  /** 開新的一局；entrants：uid → 起跑格 */
+  start(ai: number, cps: number, entrants: Record<string, number>): Promise<void>
+  sendProgress(p: Progress): Promise<void>
+  sendAi(ai: Readonly<Record<string, AiNet>>): Promise<void>
+}
+
 /** 已加入的房間；由 net 層實作 */
 export interface RoomLink {
   readonly code: string
   readonly uid: string
   readonly meta: RoomMeta
+  readonly race: RaceChannel
   send(state: NetState): Promise<void>
   /** 開始監聽房間，回傳停止監聽的函式 */
   watch(handlers: RoomHandlers, onError: (error: Error) => void): () => void
@@ -149,7 +165,16 @@ export class OnlineSession {
     this.now = options.now ?? (() => performance.now())
   }
 
-  worldTime = (): number => worldTimeAt(Date.now() + this.offset, this.link.meta.createdAt)
+  /** 伺服器時間（毫秒） */
+  serverNow = (): number => Date.now() + this.offset
+
+  worldTime = (): number => worldTimeAt(this.serverNow(), this.link.meta.createdAt)
+
+  /** 其他玩家畫面上的腳踏車位置；不在戶外騎車時回傳 null */
+  bikePositionOf = (uid: string): Vec2 | null => {
+    const s = interpolate(this.store.samplesOf(uid), this.now())
+    return s && s.mode === 'bike' && s.loc === OUTDOOR ? { x: s.x, z: s.z } : null
+  }
 
   /** 開始同步，回傳停止函式；readPlayer 回傳自己目前的狀態 */
   start(readPlayer: () => PlayerState): () => void {

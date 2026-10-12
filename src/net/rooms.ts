@@ -28,6 +28,7 @@ import {
   type RoomMeta,
   type RoomPlayer,
 } from '../sim/sync'
+import { createRaceChannel } from './race'
 
 const ROOMS = 'taipeiBike/rooms'
 const CREATE_ATTEMPTS = 10
@@ -136,6 +137,7 @@ export function createRoomRepository(db: Database): RoomRepository {
       code,
       uid,
       meta,
+      race: createRaceChannel(db, roomPath(code), uid),
       send: (state) => set(stateRef(code, uid), { ...state, t: serverTimestamp() }),
       watch: (handlers, onError) => watchRoom(code, uid, name, handlers, onError),
     }

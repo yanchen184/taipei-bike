@@ -56,7 +56,7 @@ export function createSender(lastSentAt = -Infinity): Sender {
   }
 }
 
-function lerpAngle(a: number, b: number, u: number): number {
+export function lerpAngle(a: number, b: number, u: number): number {
   let d = (b - a) % (2 * Math.PI)
   if (d > Math.PI) d -= 2 * Math.PI
   if (d < -Math.PI) d += 2 * Math.PI

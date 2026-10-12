@@ -6,6 +6,7 @@ import { useHud } from '../game/EngineContext'
 import type { OnlineSession } from '../game/online'
 import { useOnline, useRemotes } from '../game/OnlineContext'
 import { OUTDOOR, blankNetState, canSee, writeInterpolated } from '../sim/sync'
+import { BikeModel, BikeRider } from './BikeModel'
 import { AvatarModel, TaxiModel } from './PlayerView'
 
 const COLORS = ['#e8554e', '#3fb950', '#a371f7', '#f0883e', '#39c5cf'] as const
@@ -21,6 +22,7 @@ interface RemotePlayerProps {
 function RemotePlayer({ online, uid, name, color, labelRoot }: RemotePlayerProps) {
   const car = useRef<THREE.Group>(null)
   const avatar = useRef<THREE.Group>(null)
+  const bike = useRef<THREE.Group>(null)
   const label = useRef<THREE.Group>(null)
   const [shown] = useState(blankNetState)
 
@@ -44,8 +46,13 @@ function RemotePlayer({ online, uid, name, color, labelRoot }: RemotePlayerProps
       avatar.current.position.set(shown.x, 0, shown.z)
       avatar.current.rotation.y = shown.h
     }
+    if (bike.current) {
+      bike.current.visible = shown.mode === 'bike'
+      bike.current.position.set(shown.x, 0, shown.z)
+      bike.current.rotation.y = shown.h
+    }
     if (label.current) {
-      if (walking) label.current.position.set(shown.x, 2.4, shown.z)
+      if (shown.mode !== 'drive') label.current.position.set(shown.x, 2.4, shown.z)
       else label.current.position.set(shown.cx, 2.6, shown.cz)
     }
   })
@@ -57,6 +64,10 @@ function RemotePlayer({ online, uid, name, color, labelRoot }: RemotePlayerProps
       </group>
       <group ref={avatar}>
         <AvatarModel color={color} />
+      </group>
+      <group ref={bike} visible={false}>
+        <BikeModel />
+        <BikeRider color={color} />
       </group>
       <group ref={label}>
         <Html center portal={labelRoot}>

@@ -1,11 +1,12 @@
-import { useState } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import type { RaceController } from './controller'
 
 const DEFAULT_AI = 3
 
 /** 自由逛街時左下角的開賽面板；只有房主能選 AI 數量與開始 */
 export function RaceLobby({ controller }: { controller: RaceController }) {
-  const limit = controller.aiLimit()
+  const host = useSyncExternalStore(controller.subscribeRoster, controller.isHost)
+  const limit = useSyncExternalStore(controller.subscribeRoster, controller.aiLimit)
   const [ai, setAi] = useState(Math.min(DEFAULT_AI, limit))
   const [starting, setStarting] = useState(false)
   const count = Math.min(ai, limit)
@@ -18,7 +19,7 @@ export function RaceLobby({ controller }: { controller: RaceController }) {
   return (
     <div data-testid="race-lobby" className="absolute bottom-10 left-4 w-52 space-y-2 rounded-xl bg-black/60 px-4 py-3 text-white">
       <div className="font-bold">腳踏車競速</div>
-      {controller.isHost() ? (
+      {host ? (
         <>
           <label className="flex items-center justify-between text-sm">
             AI 數量

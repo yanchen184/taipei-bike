@@ -11,10 +11,12 @@ import {
   racePhase,
   rankRacers,
   type AiNet,
+  type Progress,
   type RaceMeta,
   type RacePhase,
   type Standing,
 } from '../../sim/race'
+import { INTERP_DELAY, INTERP_KEEP, lerpAngle } from '../../sim/sync'
 import type { Vec2 } from '../../sim/types'
 import { EMPTY_RACE, type RaceLink, type RaceSnapshot } from './link'
 
@@ -79,9 +81,10 @@ interface Round {
   sentCp: number
   /** 完成或比賽結束後腳踏車已停下 */
   stopped: boolean
-  /** 房主推進中的 AI；非房主為空，改讀 snapshot */
+  /** 自己當房主時推進的 AI；aiLive 為 false 時內容過期，改用同步資料 */
   ais: AiRider[]
   aiFin: (number | undefined)[]
+  aiLive: boolean
   aiClock: number
   aiSentAt: number
 }
@@ -115,6 +118,25 @@ function aiSlots(meta: RaceMeta): number[] {
     .slice(0, meta.ai)
 }
 
+/** 收到一筆 AI 同步資料的時間（serverNow） */
+interface AiSample extends AiNet {
+  at: number
+}
+
+/** samples 依 at 遞增，取 t 這個時間點的內插位置 */
+function interpolateAi(samples: readonly AiSample[], t: number): AiPose {
+  const pose = (a: AiSample, pos: Vec2, heading: number): AiPose => ({ pos, heading, cp: a.cp, fin: a.fin !== undefined })
+  const first = samples[0]!
+  const last = samples.at(-1)!
+  if (t <= first.at) return pose(first, { x: first.x, z: first.z }, first.h)
+  if (t >= last.at) return pose(last, { x: last.x, z: last.z }, last.h)
+  const k = samples.findIndex((s) => s.at >= t)
+  const a = samples[k - 1]!
+  const b = samples[k]!
+  const u = (t - a.at) / (b.at - a.at)
+  return pose(b, { x: a.x + (b.x - a.x) * u, z: a.z + (b.z - a.z) * u }, lerpAngle(a.h, b.h, u))
+}
+
 /** 一個 session 一個：管理目前這一局、房主推進 AI、切換競速模式 */
 export class RaceController {
   private readonly engine: GameEngine
@@ -122,13 +144,15 @@ export class RaceController {
   private readonly options: RaceControllerOptions
   private snap: RaceSnapshot = EMPTY_RACE
   private round: Round | null = null
+  /** 本局每台 AI 最近收到的同步資料，非房主畫面內插用 */
+  private aiSamples = new Map<string, readonly AiSample[]>()
   private active = false
   private sending = false
   private current: RaceView = IDLE_VIEW
   private readonly listeners = new Set<() => void>()
 
   readonly hooks: EngineHooks = {
-    obstacles: () => riderCircles(this.aiRiders()),
+    obstacles: () => riderCircles([...this.aiRiders(), ...this.otherRacers()]),
     controls: () => this.canRide(),
     action: (action) => this.handleAction(action),
     afterStep: (state, dt) => this.afterStep(state, dt),
@@ -152,13 +176,12 @@ export class RaceController {
     return () => this.listeners.delete(listener)
   }
 
-  isHost(): boolean {
-    return this.link.isHost()
-  }
+  /** isHost、aiLimit 可能變動時呼叫 listener */
+  subscribeRoster = (listener: () => void): (() => void) => this.link.subscribeRoster(listener)
 
-  aiLimit(): number {
-    return aiLimit(this.link.roster().length)
-  }
+  isHost = (): boolean => this.link.isHost()
+
+  aiLimit = (): number => aiLimit(this.link.roster().length)
 
   course(): Course | null {
     return this.round?.course ?? null
@@ -204,29 +227,73 @@ export class RaceController {
     this.engine.dismountBike()
   }
 
-  /** 目前畫面上的 AI：房主用自己算的，其他人用最後收到的同步資料 */
+  /** 目前畫面上的 AI：房主用自己算的，其他人用收到的同步資料落後 INTERP_DELAY 內插 */
   aiRiders(): AiPose[] {
     const r = this.round
     if (!r) return []
-    if (this.link.isHost()) {
+    if (this.simulatingAis(r)) {
       return r.ais.map((a) => ({ pos: a.bike.pos, heading: a.bike.heading, cp: a.cp, fin: a.fin }))
     }
-    return Array.from({ length: r.meta.ai }, (_, k) => this.snap.ai[String(k)])
-      .filter((a): a is AiNet => a?.n === r.meta.n)
-      .map((a) => ({ pos: { x: a.x, z: a.z }, heading: a.h, cp: a.cp, fin: a.fin !== undefined }))
+    const t = this.link.serverNow() - INTERP_DELAY
+    return Array.from({ length: r.meta.ai }, (_, k) => this.aiSamples.get(String(k)))
+      .filter((s): s is readonly AiSample[] => s !== undefined)
+      .map((s) => interpolateAi(s, t))
+  }
+
+  private simulatingAis(r: Round): boolean {
+    return r.aiLive && this.link.isHost()
+  }
+
+  /** 仍在房內、還沒完成的其他參賽玩家，位置不知道的不算 */
+  private otherRacers(): { pos: Vec2; fin: boolean }[] {
+    const r = this.round
+    if (!r) return []
+    return this.presentEntrants(r)
+      .filter((id) => id !== this.link.selfId)
+      .flatMap((id) => {
+        const pos = this.options.positionOf?.(id) ?? null
+        return pos ? [{ pos, fin: this.theirProgress(r, id)?.fin !== undefined }] : []
+      })
+  }
+
+  private presentEntrants(r: Round): string[] {
+    const present = new Set(this.link.roster().map((e) => e.id))
+    return Object.keys(r.meta.entrants).filter((id) => present.has(id))
+  }
+
+  private theirProgress(r: Round, id: string): Progress | undefined {
+    const p = this.snap.progress[id]
+    return p?.n === r.meta.n ? p : undefined
   }
 
   private onSnapshot(snap: RaceSnapshot): void {
     this.snap = snap
     const meta = snap.meta
     if (meta && meta.n !== this.round?.meta.n && this.link.selfId in meta.entrants) this.beginRound(meta)
+    else if (meta && this.round && meta.n === this.round.meta.n && meta.at !== this.round.meta.at) this.round = { ...this.round, meta }
+    this.recordAiSamples()
     this.refresh()
+  }
+
+  /** 每台 AI 的同步資料有變時記一筆，只留最近 INTERP_KEEP 筆 */
+  private recordAiSamples(): void {
+    const r = this.round
+    if (!r) return
+    const at = this.link.serverNow()
+    for (const [k, a] of Object.entries(this.snap.ai)) {
+      if (a.n !== r.meta.n) continue
+      const prev = this.aiSamples.get(k) ?? []
+      const last = prev.at(-1)
+      if (last && last.x === a.x && last.z === a.z && last.h === a.h && last.cp === a.cp && last.fin === a.fin) continue
+      this.aiSamples.set(k, [...prev, { ...a, at }].slice(-INTERP_KEEP))
+    }
   }
 
   private beginRound(meta: RaceMeta): void {
     const course = generateCourse(this.engine.city, meta.n)
     const slot = meta.entrants[this.link.selfId]!
     const slots = aiSlots(meta)
+    this.aiSamples = new Map()
     this.round = {
       meta,
       course,
@@ -236,6 +303,7 @@ export class RaceController {
       stopped: false,
       ais: slots.map((s) => createAi(course, s)),
       aiFin: slots.map(() => undefined),
+      aiLive: this.link.isHost(),
       aiClock: 0,
       aiSentAt: -Infinity,
     }
@@ -278,8 +346,32 @@ export class RaceController {
       this.engine.mountBike({ pos: p.pos, heading: p.heading })
     }
     this.sendProgress()
-    if (phase === 'racing' && this.link.isHost()) this.stepAis(state, dt, now)
+    this.takeOverAis()
+    if (phase === 'racing' && this.simulatingAis(this.round!)) this.stepAis(state, dt, now)
     this.refresh(now)
+  }
+
+  /** 成為房主時從最後同步的 AI 資料接手推進；不再是房主時停止推進 */
+  private takeOverAis(): void {
+    const r = this.round!
+    const host = this.link.isHost()
+    if (host === r.aiLive) return
+    if (!host) {
+      this.round = { ...r, aiLive: false }
+      return
+    }
+    const slots = aiSlots(r.meta)
+    const synced = slots.map((_, k) => {
+      const a = this.snap.ai[String(k)]
+      return a?.n === r.meta.n ? a : undefined
+    })
+    const ais = slots.map((s, k): AiRider => {
+      const a = synced[k]
+      if (!a) return createAi(r.course, s)
+      const pos = { x: a.x, z: a.z }
+      return { bike: { pos, heading: a.h, speed: a.s }, wp: a.w, cp: a.cp, anchor: pos, still: 0, fin: a.fin !== undefined }
+    })
+    this.round = { ...r, ais, aiFin: synced.map((a) => a?.fin), aiLive: true, aiClock: 0 }
   }
 
   /** 依序上傳：一次只送一筆，每筆比伺服器已確認的多一個檢查點 */
@@ -302,7 +394,7 @@ export class RaceController {
 
   private stepAis(state: GameState, dt: number, now: number): void {
     const r = this.round!
-    const self = { pos: state.player.pos, fin: r.fin !== undefined }
+    const humans = [{ pos: state.player.pos, fin: r.fin !== undefined }, ...this.otherRacers()]
     const traffic = this.engine.trafficObstacles()
     let ais = r.ais
     const aiFin = [...r.aiFin]
@@ -311,7 +403,7 @@ export class RaceController {
       clock -= AI_STEP
       ais = ais.map((ai, k) => {
         const others = ais.filter((_, j) => j !== k).map((o) => ({ pos: o.bike.pos, fin: o.fin }))
-        const next = stepAi(ai, k, r.course, AI_STEP, this.engine.city.colliders, [...riderCircles([self, ...others]), ...traffic])
+        const next = stepAi(ai, k, r.course, AI_STEP, this.engine.city.colliders, [...riderCircles([...humans, ...others]), ...traffic])
         if (next.fin && aiFin[k] === undefined) aiFin[k] = now
         return next
       })
@@ -340,19 +432,15 @@ export class RaceController {
   private standings(): Standing[] {
     const r = this.round
     if (!r) return []
-    const present = new Set(this.link.roster().map((e) => e.id))
-    const humans = Object.keys(r.meta.entrants)
-      .filter((id) => present.has(id))
-      .map((id): Standing => {
-        if (id === this.link.selfId) {
-          return { id, cp: r.cp, fin: r.fin, dist: distanceToNext(r.course, r.cp, this.engine.state.player.pos) }
-        }
-        const p = this.snap.progress[id]
-        const theirs = p?.n === r.meta.n ? p : undefined
-        const cp = theirs?.cp ?? 0
-        const pos = this.options.positionOf?.(id) ?? null
-        return { id, cp, fin: theirs?.fin, dist: pos ? distanceToNext(r.course, cp, pos) : Infinity }
-      })
+    const humans = this.presentEntrants(r).map((id): Standing => {
+      if (id === this.link.selfId) {
+        return { id, cp: r.cp, fin: this.myFin(r), dist: distanceToNext(r.course, r.cp, this.engine.state.player.pos) }
+      }
+      const theirs = this.theirProgress(r, id)
+      const cp = theirs?.cp ?? 0
+      const pos = this.options.positionOf?.(id) ?? null
+      return { id, cp, fin: theirs?.fin, dist: pos ? distanceToNext(r.course, cp, pos) : Infinity }
+    })
     const ais = this.aiRiders().map((a, k): Standing => ({
       id: aiId(k),
       cp: a.cp,
@@ -364,9 +452,9 @@ export class RaceController {
 
   private aiFinOf(k: number): number | undefined {
     const r = this.round!
-    if (this.link.isHost()) return r.aiFin[k]
     const a = this.snap.ai[String(k)]
-    return a?.n === r.meta.n ? a.fin : undefined
+    const confirmed = a?.n === r.meta.n ? a.fin : undefined
+    return this.simulatingAis(r) ? (confirmed ?? r.aiFin[k]) : confirmed
   }
 
   /** 本局最早的完成時間，含已離開房間的玩家 */
@@ -377,7 +465,12 @@ export class RaceController {
       .filter(([id, p]) => id !== this.link.selfId && p.n === r.meta.n)
       .map(([, p]) => p)
     const ais = Array.from({ length: r.meta.ai }, (_, k) => ({ fin: this.aiFinOf(k) }))
-    return firstFinish([{ fin: r.fin }, ...others, ...ais])
+    return firstFinish([{ fin: this.myFin(r) }, ...others, ...ais])
+  }
+
+  /** 自己的完成時間：伺服器已寫入時用伺服器的，否則用本機記錄的 */
+  private myFin(r: Round): number | undefined {
+    return this.theirProgress(r, this.link.selfId)?.fin ?? r.fin
   }
 
   private nameOf(id: string): string {
@@ -398,7 +491,7 @@ export class RaceController {
     const go = goTime(r.meta)
     const ranked = rankRacers(this.standings())
     const phase = racePhase(r.meta, ranked, this.firstFin(), now)
-    const elapsed = Math.max(0, (r.fin ?? now) - go)
+    const elapsed = Math.max(0, (this.myFin(r) ?? now) - go)
     return {
       n: r.meta.n,
       ais: r.meta.ai,

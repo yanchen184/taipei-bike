@@ -10,7 +10,7 @@ import { OnlineContext } from './game/OnlineContext'
 import { freeRoam } from './modes/freeRoam'
 import { createModeManager } from './modes/manager'
 import { createRace } from './modes/race'
-import { localRaceLink } from './modes/race/link'
+import { localRaceLink, onlineRaceLink } from './modes/race/link'
 import { RaceLobby } from './modes/race/RaceLobby'
 import { useActiveMode } from './modes/useActiveMode'
 import { World } from './render/World'
@@ -34,7 +34,13 @@ function Game({ engine, online }: Session) {
   const [scene, setScene] = useState<THREE.Scene | null>(null)
   const modes = useMemo(() => createModeManager({ engine }), [engine])
   const race = useMemo(
-    () => createRace(engine, localRaceLink(online?.link.uid ?? 'solo', engine.state.save.name), modes, (e) => online?.store.setError(e.message)),
+    () =>
+      online
+        ? createRace(engine, onlineRaceLink(online), modes, {
+            positionOf: online.bikePositionOf,
+            onError: (e) => online.store.setError(e.message),
+          })
+        : createRace(engine, localRaceLink('solo', engine.state.save.name), modes),
     [engine, online, modes],
   )
   const mode = useActiveMode(modes)

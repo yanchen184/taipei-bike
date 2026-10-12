@@ -55,7 +55,7 @@
                 ".validate": "newData.isNumber()"
               },
               "mode": {
-                ".validate": "newData.val() === 'walk' || newData.val() === 'drive'"
+                ".validate": "newData.val() === 'walk' || newData.val() === 'drive' || newData.val() === 'bike'"
               },
               "cx": {
                 ".validate": "newData.isNumber()"
@@ -74,6 +74,83 @@
               },
               "$other": {
                 ".validate": false
+              }
+            }
+          },
+          "race": {
+            ".write": "auth != null && root.child('taipeiBike/rooms/' + $code).child('players/' + auth.uid).exists() && (!root.child('taipeiBike/rooms/' + $code).child('slots/0').exists() || !root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/0').val()).exists() || root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/0').val() + '/joinedAt').val() >= root.child('taipeiBike/rooms/' + $code).child('players/' + auth.uid + '/joinedAt').val()) && (!root.child('taipeiBike/rooms/' + $code).child('slots/1').exists() || !root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/1').val()).exists() || root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/1').val() + '/joinedAt').val() >= root.child('taipeiBike/rooms/' + $code).child('players/' + auth.uid + '/joinedAt').val()) && (!root.child('taipeiBike/rooms/' + $code).child('slots/2').exists() || !root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/2').val()).exists() || root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/2').val() + '/joinedAt').val() >= root.child('taipeiBike/rooms/' + $code).child('players/' + auth.uid + '/joinedAt').val()) && (!root.child('taipeiBike/rooms/' + $code).child('slots/3').exists() || !root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/3').val()).exists() || root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/3').val() + '/joinedAt').val() >= root.child('taipeiBike/rooms/' + $code).child('players/' + auth.uid + '/joinedAt').val()) && (!root.child('taipeiBike/rooms/' + $code).child('slots/4').exists() || !root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/4').val()).exists() || root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/4').val() + '/joinedAt').val() >= root.child('taipeiBike/rooms/' + $code).child('players/' + auth.uid + '/joinedAt').val()) && (!root.child('taipeiBike/rooms/' + $code).child('slots/5').exists() || !root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/5').val()).exists() || root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/5').val() + '/joinedAt').val() >= root.child('taipeiBike/rooms/' + $code).child('players/' + auth.uid + '/joinedAt').val()) && (!newData.exists() || (!newData.child('progress').exists() && !newData.child('ai').exists()))",
+            "meta": {
+              ".validate": "newData.hasChildren(['n', 'ai', 'cps', 'at', 'entrants'])",
+              "n": {
+                ".validate": "newData.isNumber() && newData.val() % 1 === 0 && ((data.exists() && newData.val() === data.val() + 1) || (!data.exists() && newData.val() === 1))"
+              },
+              "ai": {
+                ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 5"
+              },
+              "cps": {
+                ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 6 && newData.val() <= 8"
+              },
+              "at": {
+                ".validate": "newData.val() === now"
+              },
+              "entrants": {
+                "$uid": {
+                  ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 5 && root.child('taipeiBike/rooms/' + $code).child('players/' + $uid).exists()"
+                }
+              },
+              "$other": {
+                ".validate": false
+              }
+            },
+            "ai": {
+              "$k": {
+                ".write": "auth != null && newData.exists() && root.child('taipeiBike/rooms/' + $code).child('players/' + auth.uid).exists() && (!root.child('taipeiBike/rooms/' + $code).child('slots/0').exists() || !root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/0').val()).exists() || root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/0').val() + '/joinedAt').val() >= root.child('taipeiBike/rooms/' + $code).child('players/' + auth.uid + '/joinedAt').val()) && (!root.child('taipeiBike/rooms/' + $code).child('slots/1').exists() || !root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/1').val()).exists() || root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/1').val() + '/joinedAt').val() >= root.child('taipeiBike/rooms/' + $code).child('players/' + auth.uid + '/joinedAt').val()) && (!root.child('taipeiBike/rooms/' + $code).child('slots/2').exists() || !root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/2').val()).exists() || root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/2').val() + '/joinedAt').val() >= root.child('taipeiBike/rooms/' + $code).child('players/' + auth.uid + '/joinedAt').val()) && (!root.child('taipeiBike/rooms/' + $code).child('slots/3').exists() || !root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/3').val()).exists() || root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/3').val() + '/joinedAt').val() >= root.child('taipeiBike/rooms/' + $code).child('players/' + auth.uid + '/joinedAt').val()) && (!root.child('taipeiBike/rooms/' + $code).child('slots/4').exists() || !root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/4').val()).exists() || root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/4').val() + '/joinedAt').val() >= root.child('taipeiBike/rooms/' + $code).child('players/' + auth.uid + '/joinedAt').val()) && (!root.child('taipeiBike/rooms/' + $code).child('slots/5').exists() || !root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/5').val()).exists() || root.child('taipeiBike/rooms/' + $code).child('players/' + root.child('taipeiBike/rooms/' + $code).child('slots/5').val() + '/joinedAt').val() >= root.child('taipeiBike/rooms/' + $code).child('players/' + auth.uid + '/joinedAt').val()) && (($k === '0' && root.child('taipeiBike/rooms/' + $code).child('race/meta').child('ai').val() > 0) || ($k === '1' && root.child('taipeiBike/rooms/' + $code).child('race/meta').child('ai').val() > 1) || ($k === '2' && root.child('taipeiBike/rooms/' + $code).child('race/meta').child('ai').val() > 2) || ($k === '3' && root.child('taipeiBike/rooms/' + $code).child('race/meta').child('ai').val() > 3) || ($k === '4' && root.child('taipeiBike/rooms/' + $code).child('race/meta').child('ai').val() > 4))",
+                ".validate": "newData.hasChildren(['n', 'x', 'z', 'h', 's', 'w', 'cp']) && newData.child('n').val() === root.child('taipeiBike/rooms/' + $code).child('race/meta').child('n').val() && (!data.child('fin').exists() || newData.child('fin').val() === data.child('fin').val())",
+                "n": {
+                  ".validate": "newData.isNumber()"
+                },
+                "x": {
+                  ".validate": "newData.isNumber()"
+                },
+                "z": {
+                  ".validate": "newData.isNumber()"
+                },
+                "h": {
+                  ".validate": "newData.isNumber()"
+                },
+                "s": {
+                  ".validate": "newData.isNumber()"
+                },
+                "w": {
+                  ".validate": "newData.isNumber()"
+                },
+                "cp": {
+                  ".validate": "newData.isNumber()"
+                },
+                "fin": {
+                  ".validate": "(!data.exists() && newData.val() === now) || newData.val() === data.val()"
+                },
+                "$other": {
+                  ".validate": false
+                }
+              }
+            },
+            "progress": {
+              "$uid": {
+                ".write": "auth != null && auth.uid === $uid && newData.exists() && root.child('taipeiBike/rooms/' + $code).child('players/' + $uid).exists() && root.child('taipeiBike/rooms/' + $code).child('race/meta').child('entrants/' + $uid).exists()",
+                ".validate": "newData.hasChildren(['n', 'cp']) && newData.child('n').val() === root.child('taipeiBike/rooms/' + $code).child('race/meta').child('n').val() && now >= root.child('taipeiBike/rooms/' + $code).child('race/meta').child('at').val() + 3000",
+                "n": {
+                  ".validate": "newData.isNumber()"
+                },
+                "cp": {
+                  ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() <= root.child('taipeiBike/rooms/' + $code).child('race/meta').child('cps').val() && ((data.exists() && newData.val() === data.val() + 1) || (!data.exists() && newData.val() === 1))"
+                },
+                "fin": {
+                  ".validate": "newData.val() === now && newData.parent().child('cp').val() === root.child('taipeiBike/rooms/' + $code).child('race/meta').child('cps').val()"
+                },
+                "$other": {
+                  ".validate": false
+                }
               }
             }
           }

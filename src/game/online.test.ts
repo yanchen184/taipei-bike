@@ -15,6 +15,12 @@ function fakeLink(reply: (state: NetState) => Promise<void> = async () => undefi
     code: 'ABCD',
     uid: 'me',
     meta: { seed: 7, creatorUid: 'me', createdAt: 1_000_000 },
+    race: {
+      watch: () => () => undefined,
+      start: async () => undefined,
+      sendProgress: async () => undefined,
+      sendAi: async () => undefined,
+    },
     send: (state) => {
       sent.push(state)
       return reply(state)
