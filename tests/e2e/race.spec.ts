@@ -129,6 +129,19 @@ test.describe('G2 倒數與騎行', () => {
     await expect.poll(async () => distance((await snapshot(page)).player.pos, r.checkpoints[0]!)).toBeLessThan(CHECKPOINT_SLACK)
     expect((await snapshot(page)).player.bike!.speed).toBe(0)
   })
+
+  test('[G2-5] 倒數時排在後一格的 AI 半透明，不擋住自己', async ({ page }) => {
+    await startSolo(page)
+    await page.getByTestId('race-ai-count').selectOption('1')
+    await page.getByTestId('race-start').click()
+    await expect(page.getByTestId('race-countdown')).toBeVisible()
+    const r = await currentRace(page)
+    expect(r.slot).toBe(0)
+    // AI 在後一格，位於相機與自己之間；畫出第一幀後仍在畫面上，但半透明
+    await expect
+      .poll(() => page.evaluate(() => window.__taipei!.shown('race-ai-0') !== null && window.__taipei!.opacity('race-ai-0')! < 0.7), { timeout: 2_500 })
+      .toBe(true)
+  })
 })
 
 /** 重生點在檢查點附近（依起跑格錯開），不一定剛好在中心 */

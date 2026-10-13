@@ -7,6 +7,7 @@ import type { OnlineSession } from '../game/online'
 import { useOnline, useRemotes } from '../game/OnlineContext'
 import { OUTDOOR, blankNetState, canSee, writeInterpolated } from '../sim/sync'
 import { BikeModel, BikeRider } from './BikeModel'
+import { useNearCameraFade } from './nearFade'
 import { AvatarModel, TaxiModel } from './PlayerView'
 
 const COLORS = ['#e8554e', '#3fb950', '#a371f7', '#f0883e', '#39c5cf'] as const
@@ -56,6 +57,7 @@ function RemotePlayer({ online, uid, name, color, labelRoot }: RemotePlayerProps
       else label.current.position.set(shown.cx, 2.6, shown.cz)
     }
   })
+  useNearCameraFade(bike)
 
   return (
     <group name={`remote-${uid}`}>

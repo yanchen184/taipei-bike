@@ -38,6 +38,8 @@ export interface TaipeiDebug {
   hasObject(name: string): boolean
   /** 這個名字的物件畫在畫面上時的世界座標；不存在或本身、上層被隱藏時為 null */
   shown(name: string): Vec2 | null
+  /** 這個名字的物件底下 mesh 的最低不透明度；不存在時為 null */
+  opacity(name: string): number | null
 }
 
 export interface DebugRace {
@@ -104,6 +106,15 @@ export function installDebug(
       object.updateWorldMatrix(true, false)
       const e = object.matrixWorld.elements
       return { x: e[12]!, z: e[14]! }
+    },
+    opacity: (name) => {
+      const object = scene?.getObjectByName(name)
+      if (!object) return null
+      let min = 1
+      object.traverse((o) => {
+        if ((o as THREE.Mesh).isMesh) min = Math.min(min, ((o as THREE.Mesh).material as THREE.Material).opacity)
+      })
+      return min
     },
     race: () => {
       const course = race.course()

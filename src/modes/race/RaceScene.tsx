@@ -2,6 +2,7 @@ import { useFrame } from '@react-three/fiber'
 import { useRef } from 'react'
 import type * as THREE from 'three'
 import { BikeModel, BikeRider } from '../../render/BikeModel'
+import { useNearCameraFade } from '../../render/nearFade'
 import { CHECKPOINT_RADIUS, checkpointPos } from '../../sim/course'
 import type { RaceController } from './controller'
 import { useRaceView } from './useRaceView'
@@ -20,6 +21,7 @@ function AiBike({ controller, k }: { controller: RaceController; k: number }) {
     g.position.set(ai.pos.x, 0, ai.pos.z)
     g.rotation.y = ai.heading
   })
+  useNearCameraFade(group)
   return (
     <group ref={group} name={`race-ai-${k}`}>
       <BikeModel />

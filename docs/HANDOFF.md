@@ -65,8 +65,7 @@ npm run flow:status
 
 ## 觀察到、尚未處理
 
-- 競速倒數時，排在玩家後一格的 AI 會擋住相機（截圖 `docs/manual/img/10-race-countdown.png`）。
-- 專案沒有 favicon，瀏覽器 console 會有一筆 `/favicon.ico` 404（Phase 1 就有）。
+- 目前沒有。（倒數時 AI 擋相機已改為靠近相機的選手半透明，G2-5；favicon 已補）
 
 ## WO7 Codex review prompt 草稿
 
