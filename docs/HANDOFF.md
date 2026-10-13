@@ -1,7 +1,7 @@
 # 交接：Phase 2 競速（2026-10-12）
 
-分支 `yanchen184/goatfish`。main 仍是 Phase 1（線上 https://yanchen184.github.io/taipei-bike/ ，SHA 304936d）。
-**push main 會觸發 GitHub Actions 部署**，WO8 之前不要合併 main。
+分支 `yanchen184/goatfish`。Phase 2 已上線（https://yanchen184.github.io/taipei-bike/ ，main SHA b914f67）。
+**push main 會觸發 GitHub Actions 部署**。
 
 ## 尊上已拍板的規則
 
@@ -14,7 +14,7 @@
 | WO5 競速模擬 | 已 commit（adff03e） |
 | WO6 單人＋AI 流程 | 已 commit（5f5649d） |
 | WO7 競速連線 | 已 commit（2754108、review 修正 e93aa27）；完整 flow:status 本機節點全 ✅；Codex 第 1–7 輪的問題都已修，Codex 第 9 輪 VERDICT: APPROVED（2026-10-12） |
-| WO8 上線驗收 | 未開始 |
+| WO8 上線驗收 | 完成（2026-10-13）：規則已部署到 bikes-bbd76；main = b914f67，GitHub Actions 部署成功；線上 `flow:status` 32 個節點全 ✅（含 S1、S2） |
 
 ### WO7 已驗證（2026-10-12，本機，commit e93aa27）
 
@@ -35,8 +35,7 @@ Review 修正重點（e93aa27）：
 
 ## 接下來的步驟
 
-1. WO8（見 `docs/work-orders/WO8-race-deploy.md`）：**部署資料庫規則到 `bikes-bbd76` 前先問尊上**；部署規則 → **問過尊上後**合併／push main → 線上驗收 `LIVE_URL=https://yanchen184.github.io/taipei-bike/ EXPECTED_SHA=<main 的 SHA> npm run flow:status`。
-2. 更新流程圖與手冊（競速截圖已加在 `docs/manual/img/09`–`12`）。
+- Phase 2 全部完成。待處理的小問題見下方「觀察到、尚未處理」。
 
 ## 新電腦環境
 
