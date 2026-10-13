@@ -1,5 +1,5 @@
 import { test as base, expect, type Page } from '@playwright/test'
-import { createRoom, doors, joinRoom, remoteNames, snapshot, standAtDoor } from './helpers'
+import { ENTRY, createRoom, doors, joinRoom, remoteNames, snapshot, standAtDoor } from './helpers'
 
 /** guest：另一個 browser context 裡的玩家，測試結束時關閉 */
 const test = base.extend<{ guest: Page }>({
@@ -31,6 +31,21 @@ test.describe('M1 房間（畫面）', () => {
 })
 
 test.describe('M2 位置同步（兩個 browser context）', () => {
+  test('[M2-1] 貼圖還沒載完時也看得到其他玩家與暱稱', async ({ page, guest }) => {
+    // 線上貼圖可能要 20 秒以上，遠端玩家不能等貼圖
+    // 只擋圖片本身；dev server 上 `?import` 的同名請求是 JS 模組，要放行
+    await guest.route('**/assets/textures/**', (route) => (route.request().resourceType() === 'image' ? undefined : route.continue()))
+    const code = await createRoom(page, '阿明')
+    // 貼圖請求沒回應時 load 事件不會觸發，不能用 joinRoom 的 goto
+    await guest.goto(ENTRY, { waitUntil: 'domcontentloaded' })
+    await guest.getByTestId('name-input').fill('小美')
+    await guest.getByTestId('room-code-input').fill(code)
+    await guest.getByTestId('join-room').click()
+    await expect(guest.getByTestId('room-code')).toHaveText(code)
+    await expect(guest.getByTestId('remote-name')).toHaveText('阿明', { timeout: 5000 })
+    expect(await guest.evaluate(() => window.__taipei!.textures().some((t) => t.width === 0))).toBe(true)
+  })
+
   test('[M2-1] 一位玩家移動後，另一位玩家畫面上看到他的角色與暱稱跟著移動', async ({ page, guest }, testInfo) => {
     const code = await createRoom(page, '阿明')
     await joinRoom(guest, '小美', code)

@@ -57,11 +57,12 @@ export function World({ keyboard, ModeScene, onScene }: WorldProps) {
       <GameLoop keyboard={keyboard} />
       <Atmosphere />
       <CameraRig />
+      {/* 其他玩家不用貼圖，不等貼圖載完：線上貼圖可能要 20 秒以上 */}
+      <RemotePlayers />
       <Suspense fallback={null}>
         <TexturesReady>
           {homeId ? <Indoors key={homeId} /> : <Outdoors />}
           <PlayerView />
-          <RemotePlayers />
           {!homeId && <ModeScene />}
         </TexturesReady>
       </Suspense>
