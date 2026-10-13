@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>台北狂騎</title>
+  <meta name="description" content="在台北街頭騎腳踏車競速：穿過車陣、搶過拱門、跟朋友或 AI 一決勝負。免安裝，打開瀏覽器就能玩。" />
+  <meta property="og:title" content="台北狂騎｜城市腳踏車競速" />
+  <meta property="og:description" content="在台北街頭騎腳踏車競速：穿過車陣、搶過拱門、跟朋友或 AI 一決勝負。" />
+  <meta property="og:image" content="img/hero.jpg" />
+  <link rel="icon" href="../favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #faf7f0;
+      --surface: #ffffff;
+      --text: #1d1f24;
+      --muted: #5b606b;
+      --accent: #f5b301;
+      --accent-ink: #1d1f24;
+      --teal: #14b8a6;
+      --line: #e6e1d6;
+      --hero-ink: #ffffff;
+      --shadow: 0 10px 30px rgba(20, 20, 30, 0.12);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #12141a;
+        --surface: #1b1e26;
+        --text: #eef0f4;
+        --muted: #a5abb8;
+        --line: #2b2f3a;
+        --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #12141a;
+      --surface: #1b1e26;
+      --text: #eef0f4;
+      --muted: #a5abb8;
+      --line: #2b2f3a;
+      --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Noto Sans TC', system-ui, -apple-system, sans-serif;
+      line-height: 1.7;
+    }
+    img { display: block; max-width: 100%; }
+    a { color: inherit; }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
+
+    .hero {
+      position: relative;
+      min-height: 88vh;
+      display: flex;
+      align-items: flex-end;
+      color: var(--hero-ink);
+      background: #111 url('img/hero.jpg') center / cover no-repeat;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(0, 0, 0, 0.05) 30%, rgba(0, 0, 0, 0.78) 100%);
+    }
+    .hero .wrap { position: relative; padding-bottom: 64px; width: 100%; }
+    .tag {
+      display: inline-block;
+      padding: 2px 12px;
+      border-radius: 999px;
+      background: var(--teal);
+      color: #fff;
+      font-weight: 700;
+      font-size: 14px;
+    }
+    .hero h1 {
+      margin: 12px 0 8px;
+      font-size: clamp(44px, 9vw, 96px);
+      font-weight: 900;
+      line-height: 1.05;
+      letter-spacing: 0.02em;
+    }
+    .hero p { margin: 0 0 24px; font-size: clamp(17px, 2.4vw, 22px); max-width: 640px; }
+    .cta {
+      display: inline-block;
+      padding: 14px 32px;
+      border-radius: 14px;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-weight: 900;
+      font-size: 20px;
+      text-decoration: none;
+      box-shadow: 0 6px 0 #b78400;
+      transition: transform 0.1s;
+    }
+    .cta:hover { transform: translateY(-2px); }
+    .cta:active { transform: translateY(3px); box-shadow: 0 3px 0 #b78400; }
+    .hero small { display: block; margin-top: 14px; opacity: 0.85; }
+
+    section { padding: 72px 0; }
+    h2 { font-size: clamp(28px, 4.5vw, 40px); font-weight: 900; margin: 0 0 8px; }
+    .lead { color: var(--muted); margin: 0 0 36px; font-size: 18px; }
+
+    .feature {
+      display: grid;
+      grid-template-columns: 1.35fr 1fr;
+      gap: 32px;
+      align-items: center;
+      margin-bottom: 56px;
+    }
+    .feature:nth-of-type(even) { grid-template-columns: 1fr 1.35fr; }
+    .feature:nth-of-type(even) figure { order: 2; }
+    figure { margin: 0; }
+    figure img { border-radius: 16px; box-shadow: var(--shadow); width: 100%; height: auto; }
+    figcaption { color: var(--muted); font-size: 14px; margin-top: 8px; }
+    .feature h3 { font-size: 26px; margin: 0 0 8px; font-weight: 900; }
+    .feature p { margin: 0; color: var(--muted); font-size: 17px; }
+
+    .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; counter-reset: step; }
+    .step {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 20px;
+    }
+    .step::before {
+      counter-increment: step;
+      content: counter(step);
+      display: inline-grid;
+      place-items: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-weight: 900;
+      margin-bottom: 8px;
+    }
+    .step h3 { margin: 0 0 4px; font-size: 19px; }
+    .step p { margin: 0; color: var(--muted); font-size: 15px; }
+
+    .keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .key {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 16px;
+    }
+    kbd {
+      min-width: 44px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      border-bottom-width: 3px;
+      background: var(--bg);
+      font-family: inherit;
+      font-weight: 900;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+
+    .tips { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+    .tip { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
+    .tip h3 { margin: 0 0 6px; font-size: 18px; }
+    .tip p { margin: 0; color: var(--muted); }
+
+    .soon {
+      background: var(--surface);
+      border: 2px dashed var(--line);
+      border-radius: 16px;
+      padding: 24px;
+    }
+    .soon h3 { margin: 0 0 6px; }
+    .soon p { margin: 0; color: var(--muted); }
+
+    .final { text-align: center; padding: 88px 0; }
+    .final p { color: var(--muted); margin: 0 0 24px; font-size: 18px; }
+    footer { text-align: center; color: var(--muted); font-size: 14px; padding: 24px 16px 40px; border-top: 1px solid var(--line); }
+
+    @media (max-width: 820px) {
+      .feature, .feature:nth-of-type(even) { grid-template-columns: 1fr; gap: 16px; }
+      .feature:nth-of-type(even) figure { order: 0; }
+      .steps { grid-template-columns: 1fr 1fr; }
+      .gallery { grid-template-columns: 1fr; }
+      section { padding: 52px 0; }
+    }
+    @media (max-width: 480px) {
+      .steps { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="wrap">
+      <span class="tag">免安裝・瀏覽器直接玩</span>
+      <h1>台北狂騎</h1>
+      <p>騎上腳踏車，在台北街頭跟朋友或 AI 一決勝負。鑽過車陣、穿過拱門，第一個衝過終點的人就是街頭之王。</p>
+      <a class="cta" href="../">立即開騎 →</a>
+      <small>電腦鍵盤＋滑鼠遊玩・單人或連線都可以</small>
+    </div>
+  </header>
+
+  <main>
+    <section id="fun">
+      <div class="wrap">
+        <h2>為什麼好玩</h2>
+        <p class="lead">不是賽道，是真的街道。每一局路線都不一樣，每一個路口都可能翻盤。</p>
+
+        <div class="feature">
+          <figure>
+            <img src="img/pack.jpg" alt="一群腳踏車選手在台北街頭並排衝刺" loading="lazy" />
+          </figure>
+          <div>
+            <h3>六台車同場，肩並肩搶道</h3>
+            <p>最多 6 位選手同場比賽，選手之間會互撞。起跑後大家擠在同一條路上，誰先搶到內線過彎、誰被擠到車陣後面，幾秒內就見分曉。</p>
+          </div>
+        </div>
+
+        <div class="feature">
+          <figure>
+            <img src="img/arch.jpg" alt="穿過青綠色檢查點拱門" loading="lazy" />
+          </figure>
+          <div>
+            <h3>每局一條新路線</h3>
+            <p>賽道每局隨機產生：12–16 段街道、6–8 座檢查點拱門，最後一座就是終點。拱門要照順序通過，沒有捷徑可抄，只能靠路線判斷和過彎技術。</p>
+          </div>
+        </div>
+
+        <div class="feature">
+          <figure>
+            <img src="img/traffic.jpg" alt="在汽車與機車之間穿梭" loading="lazy" />
+          </figure>
+          <div>
+            <h3>城市不會為你停下</h3>
+            <p>汽車、機車照著紅綠燈在路上跑，紅燈會停、綠燈會衝。要繞過塞在路口的車陣，還是貼著路邊鑽過去？撞上去會被反彈，速度一下子就掉光。</p>
+          </div>
+        </div>
+
+        <div class="feature">
+          <figure>
+            <img src="img/night.jpg" alt="夜晚燈火通明的台北街頭" loading="lazy" />
+          </figure>
+          <div>
+            <h3>從清晨騎到深夜</h3>
+            <p>城裡有日夜循環，遊戲裡的一天只要現實 10 分鐘。白天陽光下的街景、黃昏的橘色天空、夜晚亮起的窗戶和車燈，每一局的氣氛都不一樣。</p>
+          </div>
+        </div>
+
+        <div class="feature">
+          <figure>
+            <img src="img/results.jpg" alt="比賽結束的成績表" loading="lazy" />
+          </figure>
+          <div>
+            <h3>差幾秒就是不同名次</h3>
+            <p>AI 對手各有快慢，最快的那台會一路咬著你。我們試玩了 6 局，只贏過一次（領先第二名 8.5 秒），其餘從第 2 名到第 6 名都拿過。一局約 2–3 分鐘，輸了按「再來一局」馬上換條新路線重來。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="how" style="background: var(--surface); border-block: 1px solid var(--line);">
+      <div class="wrap">
+        <h2>怎麼玩</h2>
+        <p class="lead">打開網頁、輸入名字，30 秒內就能站上起跑線。</p>
+        <div class="steps">
+          <div class="step">
+            <h3>進城</h3>
+            <p>輸入名字，按「單人開始」；想找朋友就「建立房間」，把房號傳給對方「加入」。</p>
+          </div>
+          <div class="step">
+            <h3>開賽</h3>
+            <p>左下角「腳踏車競速」面板選 AI 數量（0–5 台），按「開始比賽」。</p>
+          </div>
+          <div class="step">
+            <h3>衝刺</h3>
+            <p>倒數 3、2、1 後開騎。跟著青綠色光柱和拱門，依序通過每個檢查點。</p>
+          </div>
+          <div class="step">
+            <h3>結算</h3>
+            <p>通過最後一座拱門就是完賽。看成績表，不服氣就再來一局。</p>
+          </div>
+        </div>
+
+        <h3 style="margin: 48px 0 16px; font-size: 24px;">比賽操作</h3>
+        <div class="keys">
+          <div class="key"><kbd>W</kbd><span>踩踏加速</span></div>
+          <div class="key"><kbd>S</kbd><span>煞車，停下後倒退</span></div>
+          <div class="key"><kbd>A</kbd><kbd>D</kbd><span>左右轉向</span></div>
+          <div class="key"><kbd>R</kbd><span>回到上一個檢查點</span></div>
+          <div class="key"><kbd>C</kbd><span>切換追尾／俯瞰視角</span></div>
+          <div class="key"><kbd>滑鼠</kbd><span>拖曳轉動視角</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tips">
+      <div class="wrap">
+        <h2>老手才知道的訣竅</h2>
+        <p class="lead">極速大家都一樣，差距都在路口拉開。</p>
+        <div class="tips">
+          <div class="tip">
+            <h3>彎前先放 W</h3>
+            <p>全速衝進路口一定轉不過去。看到光柱轉向時先鬆油門，轉過去再踩滿。</p>
+          </div>
+          <div class="tip">
+            <h3>靠右騎機車道</h3>
+            <p>汽車走內側車道，靠右的機車道比較順。前面有機車擋住時，再切到路中間超車。</p>
+          </div>
+          <div class="tip">
+            <h3>卡住就按 R</h3>
+            <p>撞進車陣或卡在柱子邊，與其倒退半天，不如按 R 回到上一個檢查點重新出發。</p>
+          </div>
+          <div class="tip">
+            <h3>開俯瞰看全局</h3>
+            <p>按 C 切到俯瞰視角，路口的車流和下一個彎道一目了然，看完再切回來衝刺。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="more" style="padding-top: 0;">
+      <div class="wrap">
+        <h2>城市本身也能逛</h2>
+        <p class="lead">比賽之外，這是一座完整的小城：走路、開車、敲門拜訪住戶，跟朋友在同一座城裡閒晃。</p>
+        <div class="gallery">
+          <figure>
+            <img src="img/street.jpg" alt="騎在台北風格的街道上" loading="lazy" />
+            <figcaption>公寓、騎樓、招牌和行道樹</figcaption>
+          </figure>
+          <figure>
+            <img src="img/dusk.jpg" alt="黃昏時分的比賽" loading="lazy" />
+            <figcaption>黃昏時的比賽</figcaption>
+          </figure>
+          <figure>
+            <img src="img/start.jpg" alt="六位選手在起跑格準備出發" loading="lazy" />
+            <figcaption>起跑：六台車同時衝出去</figcaption>
+          </figure>
+        </div>
+        <div class="soon" style="margin-top: 32px;">
+          <h3>即將推出：整備站</h3>
+          <p>每局用同樣的 1000 元預算組車：車架、輪組、傳動、把手任你搭配。直線多就上公路細胎，彎多就換抓地寬胎。連線 PK 依然公平，比的是誰更會看路線配車。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="final">
+      <div class="wrap">
+        <h2>準備好了嗎？</h2>
+        <p>不用下載、不用註冊，打開就能騎。</p>
+        <a class="cta" href="../">立即開騎 →</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>台北狂騎 · 一款在瀏覽器裡玩的城市腳踏車競速遊戲</footer>
+</body>
+</html>
