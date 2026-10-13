@@ -10,13 +10,13 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   reporter: [['list'], ['json', { outputFile: 'node_modules/.tmp/playwright-results.json' }]],
   use: {
-    baseURL: `http://127.0.0.1:${PORT}/taipei-bike/`,
+    baseURL: `http://127.0.0.1:${PORT}/`,
     trace: 'retain-on-failure',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
     command: `npx vite --host 127.0.0.1 --port ${PORT} --strictPort`,
-    url: `http://127.0.0.1:${PORT}/taipei-bike/`,
+    url: `http://127.0.0.1:${PORT}/`,
     env: { VITE_USE_EMULATOR: 'true' },
     reuseExistingServer: false,
     timeout: 60_000,

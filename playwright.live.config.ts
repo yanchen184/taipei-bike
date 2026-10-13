@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test'
 
-const LIVE_URL = process.env.LIVE_URL ?? 'https://yanchen184.github.io/taipei-bike/'
+const LIVE_URL = process.env.LIVE_URL ?? 'https://bike.yanchen.app/'
 
 export default defineConfig({
   testDir: 'tests/live',
