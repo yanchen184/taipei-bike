@@ -43,7 +43,7 @@ function parseFlow(markdown: string): FlowNode[] {
   const nodes: FlowNode[] = []
   for (const line of markdown.split(/\r?\n/)) {
     const cells = line.split('|').map((c) => c.trim())
-    const header = cells[1]?.match(/^([ABCDGHKMNPRSV]\d+[a-z]?)\s+(.+)$/)
+    const header = cells[1]?.match(/^([ABCDGHKMNPRSVW]\d+[a-z]?)\s+(.+)$/)
     if (!header?.[1] || !header[2] || cells[2] === undefined) continue
     const id = header[1]
     const pattern = new RegExp(`(?<![\\w-])${id}-\\d+`, 'g')

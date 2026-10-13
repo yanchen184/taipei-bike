@@ -15,6 +15,7 @@
 | WO6 單人＋AI 流程 | 已 commit（5f5649d） |
 | WO7 競速連線 | 已 commit（2754108、review 修正 e93aa27）；完整 flow:status 本機節點全 ✅；Codex 第 1–7 輪的問題都已修，Codex 第 9 輪 VERDICT: APPROVED（2026-10-12） |
 | WO8 上線驗收 | 完成（2026-10-13）：規則已部署到 bikes-bbd76；main = b914f67，GitHub Actions 部署成功；線上 `flow:status` 32 個節點全 ✅（含 S1、S2） |
+| WO9 賽前整備站 | 規格已寫進 00-rules §12、01-flow W1–W5、A2、N3（2026-10-13，尊上審過草稿）；尚未實作 |
 
 ### WO7 已驗證（2026-10-12，本機，commit e93aa27）
 
@@ -35,7 +36,7 @@ Review 修正重點（e93aa27）：
 
 ## 接下來的步驟
 
-- Phase 2 全部完成。待處理的小問題見下方「觀察到、尚未處理」。
+- 實作 WO9（docs/work-orders/WO9-workshop.md）。待處理的小問題見下方「觀察到、尚未處理」。
 
 ## 新電腦環境
 

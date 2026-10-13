@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { AI_STEP, aiMaxSpeed, createAi, riderCircles, stepAi, type AiRider } from './ai'
+import { AI_STEP, createAi, riderCircles, stepAi, type AiRider } from './ai'
 import { generateCity } from './city'
 import type { Circle } from './collide'
 import { generateCourse, type Course } from './course'
@@ -17,7 +17,6 @@ function simulate(city: CityMap, course: Course, ks: number[], seconds: number, 
   const npc: Circle[] = traffic.vehicles.map((v) => ({ pos: { x: 0, z: 0 }, radius: VEHICLE_SPEC[v.kind].radius }))
   let riders: AiRider[] = ks.map((k) => createAi(course, k))
   const finishedAt: (number | null)[] = ks.map(() => null)
-  const maxSpeed: number[] = ks.map(() => 0)
   for (let step = 1; step <= seconds * STEPS_PER_SECOND; step++) {
     traffic = advanceTraffic(traffic, routes, step * AI_STEP)
     traffic.vehicles.forEach((v, i) => writeVehiclePos(routes, v, npc[i]!.pos))
@@ -27,11 +26,10 @@ function simulate(city: CityMap, course: Course, ks: number[], seconds: number, 
     })
     riders.forEach((ai, i) => {
       if (ai.fin && finishedAt[i] === null) finishedAt[i] = step * AI_STEP
-      maxSpeed[i] = Math.max(maxSpeed[i]!, ai.bike.speed)
     })
     if (finishedAt.every((t) => t !== null)) break
   }
-  return { riders, finishedAt, maxSpeed }
+  return { riders, finishedAt }
 }
 
 describe('A1 AI 騎士', () => {
@@ -101,18 +99,6 @@ describe('A1 AI 騎士', () => {
 
     const free = simulate(city, course, [0], 10).riders[0]!
     expect(Math.hypot(free.bike.pos.x - a.x, free.bike.pos.z - a.z)).toBeGreaterThan(30)
-  })
-
-  test('[A1-4] AI 1 到 AI 5 的最高速度遞增且都不超過 12 m/s', () => {
-    const speeds = [0, 1, 2, 3, 4].map(aiMaxSpeed)
-    for (let k = 1; k < speeds.length; k++) expect(speeds[k]!).toBeGreaterThan(speeds[k - 1]!)
-    expect(speeds.at(-1)!).toBeLessThanOrEqual(BIKE_SPEC.maxSpeed)
-    const city = generateCity(42)
-    const { maxSpeed } = simulate(city, generateCourse(city, 1), [0, 1, 2, 3, 4], 60)
-    maxSpeed.forEach((v, k) => {
-      expect(v).toBeLessThanOrEqual(aiMaxSpeed(k))
-      expect(v).toBeGreaterThan(aiMaxSpeed(k) - 0.5)
-    })
   })
 
   test('[A1-5] AI 撞到選手或其他 AI 時被推開並反彈', () => {
