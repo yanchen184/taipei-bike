@@ -4,6 +4,7 @@ import { Buildings } from './Buildings'
 import { Ground } from './Ground'
 import { Mrt } from './Mrt'
 import { Props } from './Props'
+import { Skyline } from './Skyline'
 
 /** 城市中不會動的部分；city 不變就不重繪 */
 export const CityStatic = memo(function CityStatic({ city }: { city: CityMap }) {
@@ -13,6 +14,7 @@ export const CityStatic = memo(function CityStatic({ city }: { city: CityMap }) 
       <Buildings buildings={city.buildings} />
       <Props props={city.props} />
       <Mrt city={city} />
+      <Skyline size={city.size} />
     </group>
   )
 })

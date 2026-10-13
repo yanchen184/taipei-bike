@@ -3,6 +3,7 @@ import { useRef } from 'react'
 import * as THREE from 'three'
 import { gameHour, isNight } from '../sim/clock'
 import { useEngine } from '../game/EngineContext'
+import { SUNRISE, SUNSET, daylight } from './daylight'
 import { setNightGlow } from './materials'
 
 const DAY_SKY = new THREE.Color('#a9d3f2')
@@ -11,16 +12,21 @@ const NIGHT_SKY = new THREE.Color('#0d1424')
 const FOG_NEAR = 120
 const FOG_FAR = 520
 const SUN_DISTANCE = 300
+/** 環境光強度：夜間保留月光與路燈的亮度，路面與騎士仍看得清楚 */
+const NIGHT_AMBIENT = 0.9
+const DAY_AMBIENT = 1.45
+/** 太陽光色：正午偏白，接近日出日落時轉成橘色斜陽 */
+const NOON_SUN = new THREE.Color('#fff4e0')
+const LOW_SUN = new THREE.Color('#ffa65c')
 
-/** 0 = 深夜、1 = 正午；以 06:00–18:00 的正弦曲線計算日照 */
-function daylight(hour: number): number {
-  return Math.max(0, Math.sin(((hour - 6) / 12) * Math.PI))
+/** 晨昏的程度：0 = 白天或深夜、1 = 06:00 或 18:00 */
+function duskness(hour: number): number {
+  return Math.max(0, hour > 16 && hour < 20 ? 1 - Math.abs(hour - 18) / 2 : hour > 5 && hour < 7 ? 1 - Math.abs(hour - 6) : 0)
 }
 
 function skyColor(hour: number, out: THREE.Color): THREE.Color {
   const light = daylight(hour)
-  const dusk = hour > 16 && hour < 20 ? 1 - Math.abs(hour - 18) / 2 : hour > 5 && hour < 7 ? 1 - Math.abs(hour - 6) : 0
-  return out.copy(NIGHT_SKY).lerp(DAY_SKY, Math.min(1, light * 1.6)).lerp(DUSK_SKY, Math.max(0, dusk) * 0.6)
+  return out.copy(NIGHT_SKY).lerp(DAY_SKY, Math.min(1, light * 1.6)).lerp(DUSK_SKY, duskness(hour) * 0.6)
 }
 
 /** 依世界時間調整天空、霧、太陽與環境光，並切換夜間發光材質 */
@@ -43,14 +49,15 @@ export function Atmosphere() {
 
     const light = daylight(hour)
     if (sun.current) {
-      const angle = ((hour - 6) / 12) * Math.PI
+      const angle = ((hour - SUNRISE) / (SUNSET - SUNRISE)) * Math.PI
       const p = engine.state.player.pos
       sun.current.position.set(p.x + Math.cos(angle) * SUN_DISTANCE, Math.max(20, Math.sin(angle) * SUN_DISTANCE), p.z - 120)
       sun.current.target.position.set(p.x, 0, p.z)
       sun.current.target.updateMatrixWorld()
       sun.current.intensity = 2.2 * light
+      sun.current.color.copy(NOON_SUN).lerp(LOW_SUN, duskness(hour))
     }
-    if (ambient.current) ambient.current.intensity = indoors ? 1.4 : 0.35 + 1.1 * light
+    if (ambient.current) ambient.current.intensity = indoors ? 1.4 : NIGHT_AMBIENT + (DAY_AMBIENT - NIGHT_AMBIENT) * light
 
     const isDark = isNight(t)
     if (night.current !== isDark) {
@@ -62,7 +69,7 @@ export function Atmosphere() {
   return (
     <>
       <hemisphereLight ref={ambient} args={['#dfe8f5', '#5d564c', 1]} />
-      <directionalLight ref={sun} color="#fff4e0" />
+      <directionalLight ref={sun} />
     </>
   )
 }

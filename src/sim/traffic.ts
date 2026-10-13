@@ -1,3 +1,4 @@
+import type { Circle } from './collide'
 import { CAR_LANE_OFFSET, ROAD_WIDTH, SCOOTER_LANE_OFFSET } from './city'
 import { lightState } from './lights'
 import { createRng, hashSeed } from './rng'
@@ -10,9 +11,10 @@ export const MIN_GAP = 6
 const STOP_MARGIN = 1
 const ACCEL = 4
 
-export const VEHICLE_SPEC: Record<VehicleKind, { speed: number; halfLength: number; radius: number }> = {
-  car: { speed: 11, halfLength: 2.2, radius: 1.2 },
-  scooter: { speed: 9.5, halfLength: 1, radius: 0.6 },
+/** radius 為碰撞圓半徑；circles 為碰撞圓沿車身的前後位置（m），汽車排三顆讓碰撞範圍貼齊 4.4 m 長的車身 */
+export const VEHICLE_SPEC: Record<VehicleKind, { speed: number; halfLength: number; radius: number; circles: readonly number[] }> = {
+  car: { speed: 11, halfLength: 2.2, radius: 0.95, circles: [-1.3, 0, 1.3] },
+  scooter: { speed: 9.5, halfLength: 1, radius: 0.6, circles: [0] },
 }
 
 interface Segment {
@@ -187,6 +189,24 @@ export function vehiclePose(routes: Route[], v: Vehicle): Pose {
 export function writeVehiclePose(routes: Route[], v: Vehicle, out: Pose): void {
   writeVehiclePos(routes, v, out.pos)
   out.heading = segmentAt(routes, v).heading
+}
+
+/** 把每台車的碰撞圓依序寫進 out（重用既有物件），回傳寫入數量 */
+export function writeVehicleCircles(routes: Route[], vehicles: readonly Vehicle[], out: Circle[]): number {
+  let n = 0
+  for (const v of vehicles) {
+    const seg = segmentAt(routes, v)
+    const u = v.s - seg.start
+    const spec = VEHICLE_SPEC[v.kind]
+    for (const along of spec.circles) {
+      const circle = (out[n] ??= { pos: { x: 0, z: 0 }, radius: 0 })
+      circle.pos.x = seg.x + seg.dx * (u + along)
+      circle.pos.z = seg.z + seg.dz * (u + along)
+      circle.radius = spec.radius
+      n++
+    }
+  }
+  return n
 }
 
 /** 把車輛位置寫進 out，供每幀碰撞重用同一份物件 */

@@ -10,7 +10,8 @@ const CHASE = {
   bike: { distance: 6, height: 3.2, look: 1.2 },
   indoor: { distance: 4.5, height: 4.5, look: 1 },
 } as const
-const TOP_HEIGHT = 70
+/** 俯視高度：看得到前後兩個路口，選手仍認得出來 */
+const TOP_HEIGHT = 45
 const FOLLOW = 8
 const DRAG_SPEED = 0.005
 /** 瞬移、進出門時相機直接跳到定位 */

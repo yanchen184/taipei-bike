@@ -25,9 +25,12 @@ const ASPHALT_TILE = 8
 const PAVING_TILE = 2
 const GRASS_TILE = 4
 
+/** 城外的地面一路鋪到霧裡，俯視或從邊緣往外看不會露出天空 */
+const OUTSKIRTS = 2000
+const outskirts = new THREE.MeshLambertMaterial({ color: '#6b665f' })
+
 const white = new THREE.MeshBasicMaterial({ color: '#e8e8e2' })
 const yellow = new THREE.MeshBasicMaterial({ color: '#e7b416' })
-const wallMaterial = new THREE.MeshLambertMaterial({ color: '#8f8a80' })
 
 /** 沿某條路放一段標線：along 為道路方向座標，across 為離中線距離 */
 function mark(road: Road, along0: number, along1: number, across: number, width: number): Placement {
@@ -140,25 +143,14 @@ export function Ground({ city }: { city: CityMap }) {
   const marks = useMemo(() => roadMarkings(city), [city])
   const zebra = useMemo(() => crosswalks(city), [city])
   const slabs = useMemo(() => blockSlabs(city), [city])
-  const walls = useMemo(
-    () =>
-      city.walls.map(
-        (w): Placement => ({
-          x: (w.minX + w.maxX) / 2,
-          y: 0,
-          z: (w.minZ + w.maxZ) / 2,
-          sx: w.maxX - w.minX,
-          sy: 3,
-          sz: w.maxZ - w.minZ,
-        }),
-      ),
-    [city],
-  )
   const size = city.size + 40
   const asphalt = asphaltMaterial(size)
   const surface = surfaceMaterials()
   return (
     <group>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[city.size / 2, -0.2, city.size / 2]} material={outskirts}>
+        <planeGeometry args={[OUTSKIRTS, OUTSKIRTS]} />
+      </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[city.size / 2, 0, city.size / 2]} material={asphalt}>
         <planeGeometry args={[size, size]} />
       </mesh>
@@ -168,7 +160,6 @@ export function Ground({ city }: { city: CityMap }) {
       <Instanced items={marks.white} material={white} />
       <Instanced items={marks.yellow} material={yellow} />
       <Instanced items={zebra} material={white} />
-      <Instanced items={walls} material={wallMaterial} />
     </group>
   )
 }

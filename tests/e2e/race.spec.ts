@@ -130,6 +130,17 @@ test.describe('G2 倒數與騎行', () => {
     expect((await snapshot(page)).player.bike!.speed).toBe(0)
   })
 
+  test('[G2-6] 比賽中操作提示只列比賽騎車可用的按鍵，不顯示拜訪數', async ({ page }) => {
+    await startSolo(page)
+    await expect(page.getByTestId('controls')).toContainText('Q 叫車')
+    await expect(page.getByTestId('visited')).toBeVisible()
+    await startRace(page, 0)
+    const hint = page.getByTestId('controls')
+    for (const key of ['W 踩踏', 'S 煞車／倒退', 'A／D 轉向', 'R 回檢查點', 'C 視角', 'M 選單']) await expect(hint).toContainText(key)
+    for (const key of ['Shift', 'E ', 'Q ', 'H ']) await expect(hint).not.toContainText(key)
+    await expect(page.getByTestId('visited')).toHaveCount(0)
+  })
+
   test('[G2-5] 倒數時排在後一格的 AI 半透明，不擋住自己', async ({ page }) => {
     await startSolo(page)
     await page.getByTestId('race-ai-count').selectOption('1')

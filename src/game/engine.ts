@@ -17,11 +17,10 @@ import {
 } from '../sim/player'
 import { SAVE_KEY, loadSave, recordVisit, serializeSave, shouldSave, type SaveData } from '../sim/save'
 import {
-  VEHICLE_SPEC,
   advanceTraffic,
   buildRoutes,
   initTraffic,
-  writeVehiclePos,
+  writeVehicleCircles,
   type Route,
   type TrafficState,
 } from '../sim/traffic'
@@ -295,12 +294,7 @@ export class GameEngine {
   /** 本幀 NPC 車輛的碰撞圓，重用同一個陣列 */
   private npcObstacles(traffic: TrafficState): readonly Circle[] {
     const buffer = this.obstacleBuffer
-    traffic.vehicles.forEach((v, k) => {
-      const circle = (buffer[k] ??= { pos: { x: 0, z: 0 }, radius: 0 })
-      writeVehiclePos(this.routes, v, circle.pos)
-      circle.radius = VEHICLE_SPEC[v.kind].radius
-    })
-    buffer.length = traffic.vehicles.length
+    buffer.length = writeVehicleCircles(this.routes, traffic.vehicles, buffer)
     return buffer
   }
 

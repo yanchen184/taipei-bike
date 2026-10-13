@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { generateCity, isOnRoad } from './city'
-import { circleHitsRect } from './collide'
+import { circleHitsRect, type Circle } from './collide'
 import { CYCLE, lightState, type Light } from './lights'
 import {
   MIN_GAP,
@@ -11,6 +11,7 @@ import {
   stepTraffic,
   trafficAt,
   vehiclePose,
+  writeVehicleCircles,
   writeVehiclePos,
   type StopLine,
   type TrafficState,
@@ -108,6 +109,41 @@ describe('C4 NPC 交通', () => {
   test('[C4-5] NPC 有汽車也有機車', () => {
     const kinds = new Set(initTraffic(city).vehicles.map((v) => v.kind))
     expect(kinds).toEqual(new Set(['car', 'scooter']))
+  })
+
+  test('[C4-6] 汽車的碰撞範圍貼齊 4.4 m × 1.8 m 的車身，腳踏車撞不進車頭車尾', () => {
+    const traffic = trafficAt(city, 37)
+    const circles: Circle[] = []
+    writeVehicleCircles(routes, traffic.vehicles, circles)
+    let k = 0
+    for (const v of traffic.vehicles) {
+      const spec = VEHICLE_SPEC[v.kind]
+      const mine = circles.slice(k, k + spec.circles.length)
+      k += spec.circles.length
+      if (v.kind !== 'car') continue
+      const { pos, heading } = vehiclePose(routes, v)
+      const fwd = { x: Math.sin(heading), z: Math.cos(heading) }
+      const side = { x: fwd.z, z: -fwd.x }
+      // 車身外框上每 0.2 m 一點，離最近碰撞圓的邊不超過 0.35 m（只有四個圓角會稍微切掉）
+      for (let a = -2.2; a <= 2.2 + 1e-9; a += 0.2) {
+        for (const b of [-0.9, 0, 0.9]) {
+          const p = { x: pos.x + fwd.x * a + side.x * b, z: pos.z + fwd.z * a + side.z * b }
+          const gap = Math.min(...mine.map((c) => Math.hypot(p.x - c.pos.x, p.z - c.pos.z) - c.radius))
+          expect(gap).toBeLessThanOrEqual(0.35)
+        }
+      }
+      // 正後方與正前方完全擋住
+      for (const a of [-2.2, 2.2]) {
+        const p = { x: pos.x + fwd.x * a, z: pos.z + fwd.z * a }
+        expect(mine.some((c) => Math.hypot(p.x - c.pos.x, p.z - c.pos.z) <= c.radius + 1e-9)).toBe(true)
+      }
+      // 碰撞圓不比車頭車尾多出 0.2 m 以上的隱形保險桿
+      for (const c of mine) {
+        const along = (c.pos.x - pos.x) * fwd.x + (c.pos.z - pos.z) * fwd.z
+        expect(Math.abs(along) + c.radius).toBeLessThanOrEqual(2.2 + 0.2)
+      }
+    }
+    expect(k).toBe(circles.length)
   })
 })
 

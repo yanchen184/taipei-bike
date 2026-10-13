@@ -1,12 +1,13 @@
-import { segmentHitsRect, type Circle } from './collide'
-import { advanceCheckpoint, nodePose, type Course } from './course'
+import { isFree, segmentHitsRect, type Circle } from './collide'
+import { ROAD_WIDTH, SIDEWALK } from './city'
+import { CHECKPOINT_RADIUS, advanceCheckpoint, nodePose, type Course } from './course'
 import { MAX_AI } from './race'
 import type { Rect, Vec2 } from './types'
 import { BIKE_SPEC, stepVehicle, type DriveInput, type VehicleSpec, type VehicleState } from './vehicle'
 
 export const AI_STEP = 1 / 30
-/** 偏好的路線離路中線的距離，依序試：右側路邊、路中線 */
-const LANES = [7, 0]
+/** 偏好的路線離路中線的距離，依序試：右側機車道離路緣 1 m、路中線 */
+const LANES = [ROAD_WIDTH / 2 - SIDEWALK - 1, 0]
 const LOOK_AHEAD = 12
 /** 判斷路線是否被擋時，在腳踏車半徑外多留的空間 */
 const LANE_MARGIN = 0.3
@@ -18,10 +19,20 @@ const SLOW_ZONE = 20
 /** 離檢查點路口多遠以內走路中線（進路口前、出路口後） */
 const CHECKPOINT_APPROACH = 20
 const CHECKPOINT_EXIT = 10
+const CHECKPOINT_EXIT_LANES = [0, 3]
+/** 出彎後多遠以內改瞄靠內的路線：出彎會甩寬約 1.5 m，瞄路邊會甩上人行道 */
+const TURN_EXIT = 10
+const TURN_EXIT_LANES = [3, 0]
 const TURN_SPEED = 6
 const STEER_GAIN = 2.5
 const STUCK_DISTANCE = 3
 const STUCK_SECONDS = 3
+/** 完賽後停到終點後方人行道：離路口中心多遠開始停、每台間隔多遠、停車速度 */
+const PARK_LATERAL = ROAD_WIDTH / 2 - SIDEWALK / 2
+const PARK_START = CHECKPOINT_RADIUS + 4
+const PARK_GAP = 2.4
+const PARK_SPEED = 5
+const PARK_ARRIVE = 0.4
 
 export interface AiRider {
   bike: VehicleState
@@ -107,22 +118,22 @@ function laneBlocked(a: Vec2, b: Vec2, colliders: readonly Rect[], obstacles: re
   )
 }
 
-function chooseLane(l: Leg, along: number, colliders: readonly Rect[], obstacles: readonly Circle[]): number {
-  for (const lane of LANES) {
-    if (!laneBlocked(onLane(l, along + 1, lane), onLane(l, along + LOOK_AHEAD, lane), colliders, obstacles)) return lane
-  }
-  return LANES[0]!
+/** 依序挑第一條沒被擋的路線；全被擋時挑沒有固定障礙物（捷運柱子等）的那條，在車陣後面等車開走 */
+function chooseLane(l: Leg, along: number, lanes: readonly number[], colliders: readonly Rect[], obstacles: readonly Circle[]): number {
+  const free = (lane: number, circles: readonly Circle[]) => !laneBlocked(onLane(l, along + 1, lane), onLane(l, along + LOOK_AHEAD, lane), colliders, circles)
+  return lanes.find((lane) => free(lane, obstacles)) ?? lanes.find((lane) => free(lane, [])) ?? lanes[0]!
 }
 
 function isCheckpointNode(course: Course, index: number): boolean {
   return course.checkpoints.includes(index)
 }
 
-/** 檢查點路口前後改走路中線，確保經過檢查點 8 m 內 */
+/** 檢查點路口前後改走路中線，確保經過檢查點 8 m 內；出路口時中線被柱子擋住就走靠內的車道 */
 function laneFor(course: Course, wp: number, l: Leg, along: number, colliders: readonly Rect[], obstacles: readonly Circle[]): number {
   if (isCheckpointNode(course, wp) && l.length - along < CHECKPOINT_APPROACH) return 0
-  if (isCheckpointNode(course, wp - 1) && along < CHECKPOINT_EXIT) return 0
-  return chooseLane(l, along, colliders, obstacles)
+  if (isCheckpointNode(course, wp - 1) && along < CHECKPOINT_EXIT) return chooseLane(l, along, CHECKPOINT_EXIT_LANES, colliders, obstacles)
+  const exiting = wp >= 2 && isTurn(course, wp - 1) && along < TURN_EXIT
+  return chooseLane(l, along, exiting ? TURN_EXIT_LANES : LANES, colliders, obstacles)
 }
 
 /** 這一段結束時走的路線：終點是檢查點時為路中線 */
@@ -150,6 +161,42 @@ export function riderCircles(riders: readonly { pos: Vec2; fin: boolean }[]): Ci
   return riders.filter((r) => !r.fin).map((r) => ({ pos: r.pos, radius: BIKE_SPEC.radius }))
 }
 
+const parkCache = new WeakMap<Course, readonly Vec2[]>()
+
+/** 第 k 台 AI 完賽後的停車位：終點路口往直走、右轉、左轉方向的右側人行道，挑第一個整排都沒擋到的方向 */
+export function parkSlot(course: Course, k: number, colliders: readonly Rect[]): Vec2 {
+  let slots = parkCache.get(course)
+  if (!slots) {
+    const last = course.nodes.length - 1
+    const end = course.nodes[last]!
+    const { dir } = leg(course, last)
+    const dirs = [dir, { x: -dir.z, z: dir.x }, { x: dir.z, z: -dir.x }]
+    const row = (d: Vec2) =>
+      Array.from({ length: MAX_AI }, (_, i) => {
+        const along = PARK_START + i * PARK_GAP
+        return { x: end.x + d.x * along - d.z * PARK_LATERAL, z: end.z + d.z * along + d.x * PARK_LATERAL }
+      })
+    slots = dirs.map(row).find((r) => r.every((p) => isFree(p, BIKE_SPEC.radius, colliders))) ?? row(dir)
+    parkCache.set(course, slots)
+  }
+  return slots[k]!
+}
+
+/** 完賽後慢慢騎到自己的停車位停好；不與其他選手碰撞，只避開建築 */
+function park(ai: AiRider, k: number, course: Course, dt: number, colliders: readonly Rect[]): AiRider {
+  const slot = parkSlot(course, k, colliders)
+  const { pos, heading, speed } = ai.bike
+  const distance = Math.hypot(slot.x - pos.x, slot.z - pos.z)
+  if (distance < PARK_ARRIVE) return speed === 0 ? ai : { ...ai, bike: { ...ai.bike, speed: 0 } }
+  const error = wrapAngle(Math.atan2(slot.x - pos.x, slot.z - pos.z) - heading)
+  const input: DriveInput = {
+    forward: throttle(speed, Math.min(PARK_SPEED, distance)),
+    right: Math.max(-1, Math.min(1, -error * STEER_GAIN)),
+    handbrake: false,
+  }
+  return { ...ai, bike: stepVehicle(ai.bike, aiSpec(k), input, dt, colliders, []) }
+}
+
 /** 推進 dt 秒（固定用 AI_STEP）；obstacles 是其他選手、其他 AI 與 NPC 車 */
 export function stepAi(
   ai: AiRider,
@@ -159,7 +206,7 @@ export function stepAi(
   colliders: readonly Rect[],
   obstacles: readonly Circle[],
 ): AiRider {
-  if (ai.fin) return ai.bike.speed === 0 ? ai : { ...ai, bike: { ...ai.bike, speed: 0 } }
+  if (ai.fin) return park(ai, k, course, dt, colliders)
   const spec = aiSpec(k)
   let wp = ai.wp
   let l = leg(course, wp)

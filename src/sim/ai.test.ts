@@ -1,29 +1,38 @@
 import { describe, expect, test } from 'vitest'
-import { AI_STEP, createAi, riderCircles, stepAi, type AiRider } from './ai'
-import { generateCity } from './city'
-import type { Circle } from './collide'
-import { generateCourse, type Course } from './course'
+import { AI_STEP, createAi, parkSlot, riderCircles, stepAi, type AiRider } from './ai'
+import { ROAD_COUNT, ROAD_WIDTH, SIDEWALK, generateCity, roadCenter } from './city'
+import { isFree, type Circle } from './collide'
+import { CHECKPOINT_RADIUS, checkpointPos, generateCourse, type Course } from './course'
 import { RACE_LIMIT_MS } from './race'
-import { VEHICLE_SPEC, advanceTraffic, buildRoutes, initTraffic, writeVehiclePos, type TrafficState } from './traffic'
+import { advanceTraffic, buildRoutes, initTraffic, writeVehicleCircles, type TrafficState } from './traffic'
 import { BIKE_SPEC } from './vehicle'
-import type { CityMap } from './types'
+import type { CityMap, Vec2 } from './types'
 
 const STEPS_PER_SECOND = Math.round(1 / AI_STEP)
+const ASPHALT_HALF = ROAD_WIDTH / 2 - SIDEWALK
+const ROADS = Array.from({ length: ROAD_COUNT }, (_, i) => roadCenter(i))
+
+/** 在某條道路的柏油路面上（含路口），容許壓到路緣 margin 公尺：人行道在道路兩側最外面 SIDEWALK 公尺 */
+function onAsphalt(pos: Vec2, margin: number): boolean {
+  const half = ASPHALT_HALF + margin
+  return ROADS.some((c) => Math.abs(pos.x - c) <= half || Math.abs(pos.z - c) <= half)
+}
 
 /** NPC 交通依時間推進；together 為 true 時 AI 之間互撞，否則各自單獨跑 */
-function simulate(city: CityMap, course: Course, ks: number[], seconds: number, together = false) {
+function simulate(city: CityMap, course: Course, ks: number[], seconds: number, together = false, observe?: (riders: AiRider[]) => void) {
   const routes = buildRoutes(city)
   let traffic: TrafficState = initTraffic(city)
-  const npc: Circle[] = traffic.vehicles.map((v) => ({ pos: { x: 0, z: 0 }, radius: VEHICLE_SPEC[v.kind].radius }))
+  const npc: Circle[] = []
   let riders: AiRider[] = ks.map((k) => createAi(course, k))
   const finishedAt: (number | null)[] = ks.map(() => null)
   for (let step = 1; step <= seconds * STEPS_PER_SECOND; step++) {
     traffic = advanceTraffic(traffic, routes, step * AI_STEP)
-    traffic.vehicles.forEach((v, i) => writeVehiclePos(routes, v, npc[i]!.pos))
+    npc.length = writeVehicleCircles(routes, traffic.vehicles, npc)
     riders = riders.map((ai, i) => {
       const others = together ? riderCircles(riders.filter((_, j) => j !== i).map((o) => ({ pos: o.bike.pos, fin: o.fin }))) : []
       return stepAi(ai, ks[i]!, course, AI_STEP, city.colliders, [...npc, ...others])
     })
+    observe?.(riders)
     riders.forEach((ai, i) => {
       if (ai.fin && finishedAt[i] === null) finishedAt[i] = step * AI_STEP
     })
@@ -74,6 +83,28 @@ describe('A1 AI 騎士', () => {
     expect(circles).toEqual([{ pos: { x: 1, z: 2 }, radius: BIKE_SPEC.radius }])
   })
 
+  test('[A1-8] 完賽的 AI 騎到終點後方人行道各自的位置停好，不疊在一起、不擋終點', () => {
+    for (const [seed, n] of [[1, 1], [9, 3], [42, 2]] as const) {
+      const city = generateCity(seed)
+      const course = generateCourse(city, n)
+      const ks = [0, 1, 2, 3, 4]
+      let { riders } = simulate(city, course, ks, RACE_LIMIT_MS / 1000, true)
+      for (let step = 0; step < 20 * STEPS_PER_SECOND; step++) riders = riders.map((ai, i) => stepAi(ai, ks[i]!, course, AI_STEP, city.colliders, []))
+      const finish = checkpointPos(course, course.checkpoints.length - 1)
+      riders.forEach((ai, i) => {
+        const label = `seed ${seed} 局 ${n} AI ${i + 1}`
+        const slot = parkSlot(course, i, city.colliders)
+        expect(Math.hypot(ai.bike.pos.x - slot.x, ai.bike.pos.z - slot.z), label).toBeLessThan(0.5)
+        expect(ai.bike.speed, label).toBe(0)
+        expect(isFree(ai.bike.pos, BIKE_SPEC.radius, city.colliders), label).toBe(true)
+        expect(Math.hypot(ai.bike.pos.x - finish.x, ai.bike.pos.z - finish.z), label).toBeGreaterThan(CHECKPOINT_RADIUS)
+        riders.slice(i + 1).forEach((o) => {
+          expect(Math.hypot(ai.bike.pos.x - o.bike.pos.x, ai.bike.pos.z - o.bike.pos.z), label).toBeGreaterThan(2 * BIKE_SPEC.radius)
+        })
+      })
+    }
+  }, 120_000)
+
   test('[A1-3] AI 3 秒內移動不到 3 m 時移回最後經過的路口並朝向下一段', () => {
     const city = generateCity(3)
     const course = generateCourse(city, 1)
@@ -117,4 +148,20 @@ describe('A1 AI 騎士', () => {
     }
     expect(bounced).toBe(true)
   })
+
+  test('[A1-7] AI 騎在柏油路面上，被撞開時最多壓到路緣，不上人行道', () => {
+    const summary: string[] = []
+    for (const [seed, n] of [[3, 1], [42, 2], [999, 1], [9, 3], [2024, 3], [7, 4], [1, 1], [31337, 3]] as const) {
+      const city = generateCity(seed)
+      const course = generateCourse(city, n)
+      const off: string[] = []
+      simulate(city, course, [0, 1, 2, 3, 4], RACE_LIMIT_MS / 1000, true, (riders) =>
+        riders.forEach((ai, i) => {
+          if (!ai.fin && !onAsphalt(ai.bike.pos, BIKE_SPEC.radius)) off.push(`AI ${i + 1} (${ai.bike.pos.x.toFixed(1)}, ${ai.bike.pos.z.toFixed(1)})`)
+        }),
+      )
+      if (off.length > 0) summary.push(`seed ${seed} 局 ${n}: ${off.length} ${off.slice(0, 2).join(' ')} … ${off.slice(-1).join('')}`)
+    }
+    expect(summary).toEqual([])
+  }, 120_000)
 })

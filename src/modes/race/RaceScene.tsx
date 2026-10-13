@@ -3,12 +3,23 @@ import { useRef } from 'react'
 import type * as THREE from 'three'
 import { BikeModel, BikeRider } from '../../render/BikeModel'
 import { useNearCameraFade } from '../../render/nearFade'
-import { CHECKPOINT_RADIUS, checkpointPos } from '../../sim/course'
+import { CHECKPOINT_RADIUS, checkpointPos, type Course } from '../../sim/course'
 import type { RaceController } from './controller'
 import { useRaceView } from './useRaceView'
 
 const AI_COLORS = ['#f0883e', '#a371f7', '#3fb950', '#39c5cf', '#e8554e'] as const
 const BEAM_HEIGHT = 30
+/** 光柱淡淡的就好：遠處找得到，穿過時不會把整條街染成一片 */
+const BEAM_OPACITY = 0.22
+/** 充氣拱門跨過整條路 */
+const ARCH_RADIUS = 8.5
+
+/** 從上一個路口進入這個路口的方向 */
+function arrivalHeading(course: Course, node: number): number {
+  const from = course.nodes[node - 1]!
+  const to = course.nodes[node]!
+  return Math.atan2(to.x - from.x, to.z - from.z)
+}
 
 function AiBike({ controller, k }: { controller: RaceController; k: number }) {
   const group = useRef<THREE.Group>(null)
@@ -24,7 +35,7 @@ function AiBike({ controller, k }: { controller: RaceController; k: number }) {
   useNearCameraFade(group)
   return (
     <group ref={group} name={`race-ai-${k}`}>
-      <BikeModel />
+      <BikeModel color={AI_COLORS[k % AI_COLORS.length]} />
       <BikeRider color={AI_COLORS[k % AI_COLORS.length]} />
     </group>
   )
@@ -36,17 +47,22 @@ export function RaceScene({ controller }: { controller: RaceController }) {
   const course = controller.course()
   const next = course && !view.finished && view.cp < course.checkpoints.length ? checkpointPos(course, view.cp) : null
   const color = view.cp === view.cps - 1 ? '#ff4d4f' : '#36cfc9'
+  const heading = next && course ? arrivalHeading(course, course.checkpoints[view.cp]!) : 0
   return (
     <group name="race-scene">
       {next && (
         <group name="race-checkpoint" position={[next.x, 0, next.z]}>
           <mesh position={[0, BEAM_HEIGHT / 2, 0]}>
             <cylinderGeometry args={[1.2, 1.2, BEAM_HEIGHT, 16, 1, true]} />
-            <meshBasicMaterial color={color} transparent opacity={0.45} depthWrite={false} />
+            <meshBasicMaterial color={color} transparent opacity={BEAM_OPACITY} depthWrite={false} />
           </mesh>
           <mesh position={[0, 0.25, 0]} rotation={[-Math.PI / 2, 0, 0]}>
             <ringGeometry args={[CHECKPOINT_RADIUS - 0.6, CHECKPOINT_RADIUS, 48]} />
             <meshBasicMaterial color={color} transparent opacity={0.7} depthWrite={false} />
+          </mesh>
+          <mesh name="race-arch" rotation={[0, heading, 0]}>
+            <torusGeometry args={[ARCH_RADIUS, 0.55, 12, 40, Math.PI]} />
+            <meshLambertMaterial color={color} emissive={color} emissiveIntensity={0.25} />
           </mesh>
         </group>
       )}

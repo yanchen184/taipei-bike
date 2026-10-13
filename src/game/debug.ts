@@ -4,6 +4,7 @@ import { sceneSurfaces, type SceneSurfaces } from '../render/sceneProbe'
 import { textureStatus } from '../render/textures'
 import { hornPlayCount } from './audio'
 import type { RaceController, RaceView } from '../modes/race/controller'
+import type { Circle } from '../sim/collide'
 import type { PlayerState } from '../sim/player'
 import type { Pose, Vec2 } from '../sim/types'
 import type { GameEngine, GameState } from './engine'
@@ -20,6 +21,8 @@ export interface DebugDoor {
 export interface TaipeiDebug {
   state(): Omit<GameState, 'traffic'>
   teleport(x: number, z: number, heading?: number): void
+  /** NPC 車輛目前的碰撞圓 */
+  cars(): Circle[]
   setTime(t: number): void
   doors(): DebugDoor[]
   lighting(): ReturnType<typeof readNightGlow>
@@ -47,6 +50,8 @@ export interface DebugRace {
   slot: number
   grid: Pose[]
   checkpoints: Vec2[]
+  /** 賽道依序經過的路口中心 */
+  nodes: Vec2[]
   ais: { x: number; z: number; cp: number; fin: boolean }[]
   /** 畫面上檢查點標示的位置；沒有畫時為 null */
   marker: Vec2 | null
@@ -85,6 +90,7 @@ export function installDebug(
       return structuredClone(rest)
     },
     teleport: (x, z, heading) => engine.teleport(x, z, heading),
+    cars: () => structuredClone([...engine.trafficObstacles()]),
     setTime: (t) => engine.setTime(t),
     doors: () => engine.city.homes.map((h) => ({ id: h.id, address: h.address, door: h.door, facing: h.facing })),
     lighting: readNightGlow,
@@ -126,6 +132,7 @@ export function installDebug(
         slot,
         grid: course.grid,
         checkpoints: course.checkpoints.map((k) => course.nodes[k]!),
+        nodes: course.nodes,
         ais: race.aiRiders().map((a) => ({ x: a.pos.x, z: a.pos.z, cp: a.cp, fin: a.fin })),
         marker: marker ? { x: marker.position.x, z: marker.position.z } : null,
       })
