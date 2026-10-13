@@ -1,6 +1,6 @@
 import { test as base, expect, type Page } from '@playwright/test'
 import type { DebugRace } from '../../src/game/debug'
-import { createRoom, joinRoom } from './helpers'
+import { ENTRY, createRoom, joinRoom } from './helpers'
 
 /** guest、late：另外兩個 browser context 裡的玩家，測試結束時關閉 */
 const test = base.extend<{ guest: Page; late: Page }>({
@@ -154,6 +154,21 @@ test.describe('N1 比賽同步（兩個 browser context）', () => {
         return moved && gap < 6
       }, { timeout: 20_000 })
       .toBe(true)
+  })
+
+  test('[N1-2] 貼圖還沒載完時也畫出 AI', async ({ page, guest }) => {
+    // 線上貼圖可能要 20 秒以上，比賽場景不能等貼圖；只擋圖片本身，dev server 上 `?import` 的同名請求是 JS 模組
+    await guest.route('**/assets/textures/**', (route) => (route.request().resourceType() === 'image' ? undefined : route.continue()))
+    const code = await createRoom(page, '阿明')
+    // 貼圖請求沒回應時 load 事件不會觸發，不能用 joinRoom 的 goto
+    await guest.goto(ENTRY, { waitUntil: 'domcontentloaded' })
+    await guest.getByTestId('name-input').fill('小美')
+    await guest.getByTestId('room-code-input').fill(code)
+    await guest.getByTestId('join-room').click()
+    await expect(page.getByTestId('room-player')).toHaveCount(2)
+    await startRace(page, 2, [page, guest])
+    await expect.poll(() => Promise.all([0, 1].map((k) => shown(guest, `race-ai-${k}`))), { timeout: 5000 }).not.toContain(null)
+    expect(await guest.evaluate(() => window.__taipei!.textures().some((t) => t.width === 0))).toBe(true)
   })
 
   test('[N1-4] 開賽後才加入的玩家不參賽，但看得到參賽的玩家騎車', async ({ page, guest, late }) => {
