@@ -35,7 +35,9 @@ export function Title({ initialName, saveWasReset, onStart, onOnline }: TitlePro
     <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-sky-300 to-amber-100 p-6">
       <form onSubmit={submit} className="w-full max-w-sm space-y-5 rounded-2xl bg-white/90 p-8 shadow-xl">
         <h1 className="text-center text-4xl font-black tracking-wide text-stone-800">台北狂騎</h1>
-        <p className="text-center text-stone-600">在台北街頭開車、散步、到別人家坐坐</p>
+        <p data-testid="subtitle" className="text-center text-stone-600">
+          在台北街頭開車、騎車、到別人家坐坐，還能和朋友連線比賽
+        </p>
         {saveWasReset && (
           <p role="alert" data-testid="save-reset" className="rounded-lg bg-amber-100 px-3 py-2 text-sm text-amber-900">
             舊的存檔無法讀取，已改用新的存檔。
@@ -56,6 +58,11 @@ export function Title({ initialName, saveWasReset, onStart, onOnline }: TitlePro
               暱稱需要 {NAME_MIN}–{NAME_MAX} 個字
             </span>
           )}
+          {name.length === 0 && (
+            <span data-testid="name-hint" className="text-sm text-stone-500">
+              先輸入 {NAME_MIN}–{NAME_MAX} 字的暱稱，才能開始或連線
+            </span>
+          )}
         </label>
         <button
           type="submit"
@@ -65,8 +72,17 @@ export function Title({ initialName, saveWasReset, onStart, onOnline }: TitlePro
         >
           單人開始
         </button>
-        <fieldset disabled={!valid || busy} className="space-y-3 border-t border-stone-200 pt-5">
-          <legend className="sr-only">連線遊玩</legend>
+        <fieldset
+          disabled={!valid || busy}
+          aria-labelledby="online-heading"
+          className="space-y-3 border-t border-stone-200 pt-5"
+        >
+          <div className="space-y-1">
+            <h2 id="online-heading" className="text-lg font-bold text-stone-800">
+              和朋友連線
+            </h2>
+            <p className="text-sm text-stone-600">建立房間，把 {ROOM_CODE_LENGTH} 碼房號傳給朋友；有房號就輸入後按「加入」。</p>
+          </div>
           <button
             type="button"
             data-testid="create-room"

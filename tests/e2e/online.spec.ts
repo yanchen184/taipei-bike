@@ -28,6 +28,18 @@ test.describe('M1 房間（畫面）', () => {
     await expect(page.getByTestId('room-error')).toHaveText('找不到這個房間')
     await expect(page.getByTestId('start-solo')).toBeEnabled()
   })
+
+  test('[M1-6] 標題畫面看得出可以連線：副標題提到連線比賽，連線區有標題與說明，暱稱沒填時提示先填暱稱', async ({ page }) => {
+    await page.goto('./')
+    await expect(page.getByTestId('subtitle')).toContainText('連線')
+    const online = page.getByRole('group', { name: '和朋友連線' })
+    await expect(online.getByRole('heading', { name: '和朋友連線' })).toBeVisible()
+    await expect(online).toContainText('房號傳給朋友')
+    await expect(page.getByTestId('name-hint')).toHaveText('先輸入 2–12 字的暱稱，才能開始或連線')
+    await page.getByTestId('name-input').fill('阿明')
+    await expect(page.getByTestId('name-hint')).toBeHidden()
+    await expect(page.getByTestId('create-room')).toBeEnabled()
+  })
 })
 
 test.describe('M2 位置同步（兩個 browser context）', () => {
