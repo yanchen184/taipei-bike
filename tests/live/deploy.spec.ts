@@ -14,6 +14,8 @@ test('[S1-1] 線上頁面的 commit meta 等於 main 的 SHA', async ({ page }) 
 
 test('[S1-2] 線上單人：開車前進、下車走到住家、進門、出門', async ({ page }, testInfo) => {
   await startSolo(page, '線上驗收')
+  // 貼圖載完那一刻主執行緒會卡 1–2 秒，落在 1.5 秒的油門裡就量不到前進距離
+  await page.waitForFunction(() => window.__taipei!.textures().every((t) => t.width > 0), undefined, { timeout: 60_000 })
   await page.keyboard.press('e')
   const start = await snapshot(page)
   expect(start.player.mode).toBe('drive')
