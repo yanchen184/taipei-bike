@@ -100,3 +100,47 @@ export function nodePose(course: Course, k: number): Pose {
 export function respawnPose(course: Course, cp: number, slot: number): Pose {
   return cp === 0 ? course.grid[slot]! : nodePose(course, course.checkpoints[cp - 1]!)
 }
+
+export type TurnKind = 'left' | 'right' | 'straight' | 'finish'
+
+/** 路線上下一個要經過的路口 */
+export interface TurnHint {
+  /** 路口在 nodes 中的索引 */
+  node: number
+  kind: TurnKind
+  /** 到路口中心的直線距離 */
+  dist: number
+}
+
+function segmentDistance(p: Vec2, a: Vec2, b: Vec2): number {
+  const d = unit(a, b)
+  const length = Math.hypot(b.x - a.x, b.z - a.z)
+  const u = Math.min(Math.max((p.x - a.x) * d.x + (p.z - a.z) * d.z, 0), length)
+  return Math.hypot(p.x - (a.x + d.x * u), p.z - (a.z + d.z * u))
+}
+
+/** 在路口 k 要怎麼轉：前後兩段方向的叉積，正的是右轉（D 讓 heading 變小） */
+function turnAt(course: Course, k: number): TurnKind {
+  const [a, b, c] = [course.nodes[k - 1]!, course.nodes[k]!, course.nodes[k + 1]]
+  if (!c) return 'finish'
+  const cross = (b.x - a.x) * (c.z - b.z) - (b.z - a.z) * (c.x - b.x)
+  if (cross === 0) return 'straight'
+  return cross > 0 ? 'right' : 'left'
+}
+
+/**
+ * 下一個路口：只在「上一個檢查點的前一段」到「下一個檢查點」之間找離 pos 最近的路段（一樣近取後面那段），
+ * 快到檢查點時仍提示檢查點那個路口，也不會被平行的路線路段帶走；已完成時為 null
+ */
+export function nextTurn(course: Course, cp: number, pos: Vec2): TurnHint | null {
+  if (cp >= course.checkpoints.length) return null
+  const prev = cp === 0 ? 0 : course.checkpoints[cp - 1]!
+  const last = course.checkpoints[cp]! - 1
+  let seg = Math.max(0, prev - 1)
+  for (let k = seg + 1; k <= last; k++) {
+    if (segmentDistance(pos, course.nodes[k]!, course.nodes[k + 1]!) <= segmentDistance(pos, course.nodes[seg]!, course.nodes[seg + 1]!)) seg = k
+  }
+  const node = seg + 1
+  const at = course.nodes[node]!
+  return { node, kind: turnAt(course, node), dist: Math.hypot(pos.x - at.x, pos.z - at.z) }
+}

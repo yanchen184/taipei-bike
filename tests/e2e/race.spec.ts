@@ -215,3 +215,80 @@ test.describe('G4 比賽結束', () => {
     expect(await hasObject(page, 'race-ai-0')).toBe(false)
   })
 })
+
+const TURN_LABEL = { left: '左轉', right: '右轉', straight: '直行', finish: '終點' } as const
+
+/** 賽道上路口 k 怎麼轉（前後兩段方向的叉積，正的是右轉） */
+function turnAt(nodes: { x: number; z: number }[], k: number): keyof typeof TURN_LABEL {
+  const [a, b, c] = [nodes[k - 1]!, nodes[k]!, nodes[k + 1]]
+  if (!c) return 'finish'
+  const cross = (b.x - a.x) * (c.z - b.z) - (b.z - a.z) * (c.x - b.x)
+  return cross === 0 ? 'straight' : cross > 0 ? 'right' : 'left'
+}
+
+/** 瞬移到第 k 段路上 u 的位置、面向路段前方 */
+async function rideOnSegment(page: Page, nodes: { x: number; z: number }[], k: number, u: number): Promise<void> {
+  const [a, b] = [nodes[k]!, nodes[k + 1]!]
+  const pose = { x: a.x + (b.x - a.x) * u, z: a.z + (b.z - a.z) * u, h: Math.atan2(b.x - a.x, b.z - a.z) }
+  await page.evaluate(({ x, z, h }) => window.__taipei!.teleport(x, z, h), pose)
+}
+
+test.describe('G5 導航', () => {
+  test('[G5-2] HUD 顯示下一個路口怎麼轉與距離，騎過路口後換成下一個路口', async ({ page }) => {
+    await startSolo(page)
+    const { nodes } = await startRace(page, 0)
+    const turn = page.getByTestId('race-turn')
+
+    await rideOnSegment(page, nodes, 0, 0.5)
+    await expect(turn).toHaveAttribute('data-kind', turnAt(nodes, 1))
+    await expect(turn).toContainText(TURN_LABEL[turnAt(nodes, 1)])
+    await expect(turn).toContainText('40 m')
+
+    await rideOnSegment(page, nodes, 1, 0.75)
+    await expect(turn).toHaveAttribute('data-kind', turnAt(nodes, 2))
+    await expect(turn).toContainText(TURN_LABEL[turnAt(nodes, 2)])
+    await expect(turn).toContainText('20 m')
+  })
+
+  test('[G5-3] 右下角小地圖車頭朝上，畫出自己、下一個檢查點與每台 AI；檢查點在範圍外時邊緣有箭頭', async ({ page }) => {
+    await startSolo(page)
+    const { nodes, checkpoints } = await startRace(page, 3)
+    const map = page.getByTestId('race-minimap')
+    await expect(map).toBeVisible()
+    await expect(map.getByTestId('minimap-route')).toHaveCount(1)
+    await expect(map.getByTestId('minimap-ai')).toHaveCount(3)
+
+    // 朝第一個檢查點騎：檢查點在自己正上方
+    await rideOnSegment(page, nodes, 1, 0.5)
+    await expect(map.getByTestId('minimap-arrow')).toBeHidden()
+    await expect
+      .poll(async () => {
+        const self = (await map.getByTestId('minimap-self').boundingBox())!
+        const next = (await map.getByTestId('minimap-next').boundingBox())!
+        return { aligned: Math.abs(next.x + next.width / 2 - (self.x + self.width / 2)) <= 2, above: next.y + next.height / 2 < self.y }
+      })
+      .toEqual({ aligned: true, above: true })
+
+    const speed = (await page.getByTestId('speed').boundingBox())!
+    const box = (await map.boundingBox())!
+    expect(speed.x + speed.width <= box.x || speed.y + speed.height <= box.y).toBe(true)
+
+    // 城市離第一個檢查點最遠的角落
+    const cp = checkpoints[0]!
+    const corners = [8, 312].flatMap((x) => [8, 312].map((z) => ({ x, z })))
+    const far = corners.reduce((a, b) => (distance(b, cp) > distance(a, cp) ? b : a))
+    await page.evaluate(({ x, z }) => window.__taipei!.teleport(x, z, 0), far)
+    await expect(map.getByTestId('minimap-arrow')).toBeVisible()
+  })
+
+  test('[G5-4] 退出比賽回到城市後小地圖與路口提示移除', async ({ page }) => {
+    await startSolo(page)
+    await startRace(page, 1)
+    await expect(page.getByTestId('race-minimap')).toBeVisible()
+    await expect(page.getByTestId('race-turn')).toBeVisible()
+    await page.getByTestId('race-quit').click()
+    await expect(page.getByTestId('race-lobby')).toBeVisible()
+    await expect(page.getByTestId('race-minimap')).toHaveCount(0)
+    await expect(page.getByTestId('race-turn')).toHaveCount(0)
+  })
+})

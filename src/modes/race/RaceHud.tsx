@@ -1,4 +1,6 @@
+import type { TurnKind } from '../../sim/course'
 import type { RaceController, ResultRow } from './controller'
+import { RaceMinimap } from './RaceMinimap'
 import { useRaceView } from './useRaceView'
 
 /** 毫秒 → m:ss.d */
@@ -8,6 +10,9 @@ export function formatRaceTime(ms: number): string {
   const seconds = Math.floor((tenths % 600) / 10)
   return `${minutes}:${String(seconds).padStart(2, '0')}.${tenths % 10}`
 }
+
+const TURN_LABEL: Record<TurnKind, string> = { left: '左轉', right: '右轉', straight: '直行', finish: '終點' }
+const TURN_ICON: Record<TurnKind, string> = { left: '↰', right: '↱', straight: '↑', finish: '🏁' }
 
 const BUTTON = 'pointer-events-auto rounded-lg px-4 py-2 font-bold shadow'
 
@@ -44,17 +49,30 @@ export function RaceHud({ controller }: { controller: RaceController }) {
   const v = useRaceView(controller)
   return (
     <div data-testid="race-hud">
-      <div className="pointer-events-none absolute left-1/2 top-4 flex -translate-x-1/2 gap-5 rounded-xl bg-black/60 px-5 py-2 text-white">
-        <span data-testid="race-cp">
-          檢查點 {v.cp} / {v.cps}
-        </span>
-        <span data-testid="race-time" className="tabular-nums">
-          {formatRaceTime(v.elapsed)}
-        </span>
-        <span data-testid="race-rank">
-          第 {v.rank} / {v.total} 名
-        </span>
+      <div className="pointer-events-none absolute left-1/2 top-4 flex -translate-x-1/2 flex-col items-center gap-2">
+        <div className="flex gap-5 rounded-xl bg-black/60 px-5 py-2 text-white">
+          <span data-testid="race-cp">
+            檢查點 {v.cp} / {v.cps}
+          </span>
+          <span data-testid="race-time" className="tabular-nums">
+            {formatRaceTime(v.elapsed)}
+          </span>
+          <span data-testid="race-rank">
+            第 {v.rank} / {v.total} 名
+          </span>
+        </div>
+        {v.turn && (
+          <div data-testid="race-turn" data-kind={v.turn} className="flex items-center gap-2 rounded-xl bg-black/60 px-4 py-1.5 text-lg font-bold text-white">
+            <span aria-hidden="true" className="text-2xl leading-none">
+              {TURN_ICON[v.turn]}
+            </span>
+            <span>
+              前方 <span className="tabular-nums">{v.turnDist}</span> m {TURN_LABEL[v.turn]}
+            </span>
+          </div>
+        )}
       </div>
+      <RaceMinimap controller={controller} />
       {v.phase === 'countdown' && (
         <div data-testid="race-countdown" className="pointer-events-none absolute left-1/2 top-1/3 -translate-x-1/2 text-8xl font-black text-white drop-shadow-lg">
           {v.countdown}

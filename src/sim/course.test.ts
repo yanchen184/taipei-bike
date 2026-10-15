@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { STRIDE, generateCity, isOnRoad } from './city'
 import { isFree } from './collide'
-import { CHECKPOINT_RADIUS, GRID_SIZE, advanceCheckpoint, checkpointPos, generateCourse } from './course'
+import { CHECKPOINT_RADIUS, GRID_SIZE, advanceCheckpoint, checkpointPos, generateCourse, nextTurn, type Course } from './course'
 import { VEHICLE_SPEC, buildRoutes } from './traffic'
 import type { Vec2 } from './types'
 import { BIKE_SPEC } from './vehicle'
@@ -104,5 +104,63 @@ describe('K1 賽道生成', () => {
     const finish = checkpointPos(course, cps - 1)
     expect(advanceCheckpoint(course, cps - 1, finish)).toBe(cps)
     expect(advanceCheckpoint(course, cps, finish)).toBe(cps)
+  })
+})
+
+describe('G5 導航', () => {
+  /** 往 +z 騎，在 B 右轉（往 -x）、C 左轉（往 +z）、D 直行，E 是終點 */
+  const L: Course = {
+    n: 1,
+    nodes: [
+      { x: 100, z: 0 },
+      { x: 100, z: 76 },
+      { x: 24, z: 76 },
+      { x: 24, z: 152 },
+      { x: 24, z: 228 },
+    ],
+    checkpoints: [2, 4],
+    grid: [],
+  }
+
+  test('[G5-1] 下一個路口的轉向與距離，騎過路口中心才換下一個', () => {
+    expect(nextTurn(L, 0, { x: 101, z: 20 })).toEqual({ node: 1, kind: 'right', dist: Math.hypot(1, 56) })
+    expect(nextTurn(L, 0, { x: 100, z: 74 })?.node).toBe(1)
+    expect(nextTurn(L, 0, { x: 90, z: 76 })).toEqual({ node: 2, kind: 'left', dist: 66 })
+    // 檢查點在 8 m 外就算通過，這時仍提示檢查點那個路口怎麼轉
+    expect(nextTurn(L, 1, { x: 30, z: 77 })).toMatchObject({ node: 2, kind: 'left' })
+    expect(nextTurn(L, 1, { x: 24, z: 120 })).toEqual({ node: 3, kind: 'straight', dist: 32 })
+    expect(nextTurn(L, 1, { x: 24, z: 180 })).toEqual({ node: 4, kind: 'finish', dist: 48 })
+    expect(nextTurn(L, 2, { x: 24, z: 228 })).toBeNull()
+  })
+
+  test('[G5-1] 只在上一個檢查點的前一段到下一個檢查點之間找，不會被平行的路線路段帶走', () => {
+    // 離第 3 段（往終點那段）比較近，但還沒通過第一個檢查點
+    expect(nextTurn(L, 0, { x: 30, z: 200 })?.node).toBeLessThanOrEqual(2)
+  })
+
+  test('[G5-1] 多個 seed 的賽道：沿路線騎，每段都提示下一個路口，轉向與叉積一致', () => {
+    for (const seed of SEEDS) {
+      const city = generateCity(seed)
+      for (const n of ROUNDS) {
+        const course = generateCourse(city, n)
+        const { nodes, checkpoints } = course
+        for (let k = 0; k < nodes.length - 1; k++) {
+          const a = nodes[k]!
+          const b = nodes[k + 1]!
+          const pos = { x: a.x + (b.x - a.x) * 0.7, z: a.z + (b.z - a.z) * 0.7 }
+          const cp = checkpoints.filter((c) => c <= k).length
+          const turn = nextTurn(course, cp, pos)!
+          expect(turn.node).toBe(k + 1)
+          expect(turn.dist).toBeCloseTo(STRIDE * 0.3, 5)
+          const c = nodes[k + 2]
+          if (!c) {
+            expect(turn.kind).toBe('finish')
+            continue
+          }
+          const cross = (b.x - a.x) * (c.z - b.z) - (b.z - a.z) * (c.x - b.x)
+          expect(turn.kind).toBe(cross === 0 ? 'straight' : cross > 0 ? 'right' : 'left')
+        }
+      }
+    }
   })
 })

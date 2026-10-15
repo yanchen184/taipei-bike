@@ -5,9 +5,9 @@ import { BikeModel, BikeRider } from '../../render/BikeModel'
 import { useNearCameraFade } from '../../render/nearFade'
 import { CHECKPOINT_RADIUS, checkpointPos, type Course } from '../../sim/course'
 import type { RaceController } from './controller'
+import { CHECKPOINT_COLOR, FINISH_COLOR, aiColor } from './palette'
 import { useRaceView } from './useRaceView'
 
-const AI_COLORS = ['#f0883e', '#a371f7', '#3fb950', '#39c5cf', '#e8554e'] as const
 const BEAM_HEIGHT = 30
 /** 光柱淡淡的就好：遠處找得到，穿過時不會把整條街染成一片 */
 const BEAM_OPACITY = 0.22
@@ -35,8 +35,8 @@ function AiBike({ controller, k }: { controller: RaceController; k: number }) {
   useNearCameraFade(group)
   return (
     <group ref={group} name={`race-ai-${k}`}>
-      <BikeModel color={AI_COLORS[k % AI_COLORS.length]} />
-      <BikeRider color={AI_COLORS[k % AI_COLORS.length]} />
+      <BikeModel color={aiColor(k)} />
+      <BikeRider color={aiColor(k)} />
     </group>
   )
 }
@@ -46,7 +46,7 @@ export function RaceScene({ controller }: { controller: RaceController }) {
   const view = useRaceView(controller)
   const course = controller.course()
   const next = course && !view.finished && view.cp < course.checkpoints.length ? checkpointPos(course, view.cp) : null
-  const color = view.cp === view.cps - 1 ? '#ff4d4f' : '#36cfc9'
+  const color = view.cp === view.cps - 1 ? FINISH_COLOR : CHECKPOINT_COLOR
   const heading = next && course ? arrivalHeading(course, course.checkpoints[view.cp]!) : 0
   return (
     <group name="race-scene">

@@ -1,6 +1,6 @@
 import type { Action, EngineHooks, GameEngine, GameState } from '../../game/engine'
 import { AI_STEP, createAi, riderCircles, stepAi, type AiRider } from '../../sim/ai'
-import { advanceCheckpoint, distanceToNext, generateCourse, respawnPose, type Course } from '../../sim/course'
+import { advanceCheckpoint, distanceToNext, generateCourse, nextTurn, respawnPose, type Course, type TurnKind } from '../../sim/course'
 import {
   MAX_RACERS,
   aiId,
@@ -24,6 +24,8 @@ import { EMPTY_RACE, type RaceLink, type RaceSnapshot } from './link'
 const AI_SEND_MS = 100
 /** HUD 經過時間的精度（毫秒） */
 const CLOCK_STEP = 100
+/** 路口提示距離的精度（公尺） */
+const TURN_STEP = 10
 /** 比賽中引擎不處理的按鍵：R 改成回檢查點，E、Q 不能下車或叫車 */
 const BLOCKED_ACTIONS: readonly Action[] = ['interact', 'callCar']
 
@@ -52,6 +54,10 @@ export interface RaceView {
   host: boolean
   /** 比賽結束後的成績表 */
   results: readonly ResultRow[] | null
+  /** 下一個路口怎麼轉；不在競速模式、不參賽或已完成時為 null */
+  turn: TurnKind | null
+  /** 到下一個路口的距離，以 TURN_STEP 為單位 */
+  turnDist: number
 }
 
 export interface AiPose {
@@ -105,6 +111,8 @@ const IDLE_VIEW: RaceView = {
   finished: false,
   host: false,
   results: null,
+  turn: null,
+  turnDist: 0,
 }
 
 function viewEqual(a: RaceView, b: RaceView): boolean {
@@ -256,6 +264,13 @@ export class RaceController {
     return Array.from({ length: r.meta.ai }, (_, k) => this.aiSamples.get(String(k)))
       .filter((s): s is readonly AiSample[] => s !== undefined)
       .map((s) => interpolateAi(s, t))
+  }
+
+  /** 仍在房內、還沒完成的其他參賽玩家的位置（小地圖用） */
+  rivals(): Vec2[] {
+    return this.otherRacers()
+      .filter((o) => !o.fin)
+      .map((o) => o.pos)
   }
 
   private simulatingAis(r: Round): boolean {
@@ -548,6 +563,7 @@ export class RaceController {
     const ranked = rankRacers(this.standings())
     const phase = racePhase(r.meta, ranked, this.firstFin(), now)
     const elapsed = Math.max(0, (this.myFin(r) ?? now) - go)
+    const turn = this.active && r.slot !== null && r.fin === undefined ? nextTurn(r.course, r.cp, this.engine.state.player.pos) : null
     return {
       n: r.meta.n,
       ais: r.meta.ai,
@@ -564,6 +580,8 @@ export class RaceController {
         phase === 'over'
           ? ranked.map((s, k) => ({ rank: k + 1, id: s.id, name: this.nameOf(s.id), time: s.fin === undefined ? null : s.fin - go }))
           : null,
+      turn: turn?.kind ?? null,
+      turnDist: turn ? Math.round(turn.dist / TURN_STEP) * TURN_STEP : 0,
     }
   }
 
