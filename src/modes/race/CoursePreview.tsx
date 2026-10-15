@@ -8,6 +8,8 @@ import { Roads } from './RaceMinimap'
 const ROUTE_WIDTH = 10
 const MARK_RADIUS = 22
 const LABEL_SIZE = 26
+/** 地圖四周留白，城市邊緣的起點與檢查點圈才不會被切掉 */
+const PAD = MARK_RADIUS + 4
 
 /** 整備站左邊的本局賽道預覽：俯視城市地圖、路線、起點、檢查點、轉彎數、最長直線 */
 export function CoursePreview({ course }: { course: Course }) {
@@ -18,7 +20,7 @@ export function CoursePreview({ course }: { course: Course }) {
     <div className="flex flex-col gap-2">
       <svg
         data-testid="workshop-map"
-        viewBox={`0 0 ${CITY_SIZE} ${CITY_SIZE}`}
+        viewBox={`${-PAD} ${-PAD} ${CITY_SIZE + PAD * 2} ${CITY_SIZE + PAD * 2}`}
         className="aspect-square w-full rounded-xl bg-stone-900"
         aria-label="本局賽道"
         role="img"
