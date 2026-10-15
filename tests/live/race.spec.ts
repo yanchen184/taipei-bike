@@ -21,11 +21,13 @@ function distance(a: { x: number; z: number }, b: { x: number; z: number }): num
   return Math.hypot(a.x - b.x, a.z - b.z)
 }
 
-/** 開一局，等到所有 pages 都進入騎行階段 */
+/** 開一局，所有 pages 進入整備站並看到賽道預覽；單人按「出發」，連線等 20 秒整備，直到所有 pages 都進入騎行階段 */
 async function startRace(host: Page, ai: number, pages: Page[]): Promise<void> {
   await host.getByTestId('race-ai-count').selectOption(String(ai))
   await host.getByTestId('race-start').click()
-  for (const p of pages) await expect.poll(async () => (await currentRace(p)).view.phase, { timeout: 15_000 }).toBe('racing')
+  for (const p of pages) await expect(p.getByTestId('workshop-map')).toBeVisible({ timeout: 15_000 })
+  if (pages.length === 1) await host.getByTestId('race-go').click()
+  for (const p of pages) await expect.poll(async () => (await currentRace(p)).view.phase, { timeout: 40_000 }).toBe('racing')
 }
 
 /** 瞬移通過第 from 個之後的每個檢查點 */

@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'vitest'
-import { AI_STEP, createAi, parkSlot, riderCircles, stepAi, type AiRider } from './ai'
+import { AI_STEP, aiDriver, createAi, parkSlot, riderCircles, stepAi, type AiDriver, type AiRider } from './ai'
+import { aiBuild } from './balance'
 import { ROAD_COUNT, ROAD_WIDTH, SIDEWALK, generateCity, roadCenter } from './city'
 import { isFree, type Circle } from './collide'
 import { CHECKPOINT_RADIUS, checkpointPos, generateCourse, type Course } from './course'
+import { DEFAULT_BUILD } from './parts'
 import { RACE_LIMIT_MS } from './race'
 import { advanceTraffic, buildRoutes, initTraffic, writeVehicleCircles, type TrafficState } from './traffic'
 import { BIKE_SPEC } from './vehicle'
@@ -18,8 +20,14 @@ function onAsphalt(pos: Vec2, margin: number): boolean {
   return ROADS.some((c) => Math.abs(pos.x - c) <= half || Math.abs(pos.z - c) <= half)
 }
 
+/** 第 k 台 AI 用自己這一局的組裝 */
+function drivers(city: CityMap, course: Course, ks: number[]): AiDriver[] {
+  return ks.map((k) => aiDriver(k, aiBuild(course, city.seed, k)))
+}
+
 /** NPC 交通依時間推進；together 為 true 時 AI 之間互撞，否則各自單獨跑 */
 function simulate(city: CityMap, course: Course, ks: number[], seconds: number, together = false, observe?: (riders: AiRider[]) => void) {
+  const ds = drivers(city, course, ks)
   const routes = buildRoutes(city)
   let traffic: TrafficState = initTraffic(city)
   const npc: Circle[] = []
@@ -30,7 +38,7 @@ function simulate(city: CityMap, course: Course, ks: number[], seconds: number, 
     npc.length = writeVehicleCircles(routes, traffic.vehicles, npc)
     riders = riders.map((ai, i) => {
       const others = together ? riderCircles(riders.filter((_, j) => j !== i).map((o) => ({ pos: o.bike.pos, fin: o.fin }))) : []
-      return stepAi(ai, ks[i]!, course, AI_STEP, city.colliders, [...npc, ...others])
+      return stepAi(ai, ds[i]!, course, AI_STEP, city.colliders, [...npc, ...others])
     })
     observe?.(riders)
     riders.forEach((ai, i) => {
@@ -89,7 +97,8 @@ describe('A1 AI 騎士', () => {
       const course = generateCourse(city, n)
       const ks = [0, 1, 2, 3, 4]
       let { riders } = simulate(city, course, ks, RACE_LIMIT_MS / 1000, true)
-      for (let step = 0; step < 20 * STEPS_PER_SECOND; step++) riders = riders.map((ai, i) => stepAi(ai, ks[i]!, course, AI_STEP, city.colliders, []))
+      const ds = drivers(city, course, ks)
+      for (let step = 0; step < 20 * STEPS_PER_SECOND; step++) riders = riders.map((ai, i) => stepAi(ai, ds[i]!, course, AI_STEP, city.colliders, []))
       const finish = checkpointPos(course, course.checkpoints.length - 1)
       riders.forEach((ai, i) => {
         const label = `seed ${seed} 局 ${n} AI ${i + 1}`
@@ -118,7 +127,7 @@ describe('A1 AI 騎士', () => {
     }))
     let respawnedAt: number | null = null
     for (let step = 1; step <= 4 * STEPS_PER_SECOND && respawnedAt === null; step++) {
-      ai = stepAi(ai, 0, course, AI_STEP, city.colliders, ring)
+      ai = stepAi(ai, aiDriver(0, DEFAULT_BUILD), course, AI_STEP, city.colliders, ring)
       if (ai.bike.pos.x === a.x && ai.bike.pos.z === a.z) respawnedAt = step * AI_STEP
     }
     expect(respawnedAt).not.toBeNull()
@@ -141,7 +150,7 @@ describe('A1 AI 騎士', () => {
     let ai: AiRider = { ...start, bike: { ...start.bike, speed: 8 } }
     let bounced = false
     for (let step = 0; step < STEPS_PER_SECOND; step++) {
-      ai = stepAi(ai, 0, course, AI_STEP, city.colliders, [other])
+      ai = stepAi(ai, aiDriver(0, DEFAULT_BUILD), course, AI_STEP, city.colliders, [other])
       if (ai.bike.speed < 0) bounced = true
       const d = Math.hypot(ai.bike.pos.x - other.pos.x, ai.bike.pos.z - other.pos.z)
       expect(d).toBeGreaterThanOrEqual(2 * BIKE_SPEC.radius - 1e-9)

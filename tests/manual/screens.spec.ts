@@ -60,6 +60,9 @@ test('05 競速', async ({ page }) => {
   await shot(page, '09-race-lobby')
 
   await page.getByTestId('race-start').click()
+  await expect(page.getByTestId('race-workshop')).toBeVisible()
+  await shot(page, '10-race-workshop')
+  await page.getByTestId('race-go').click()
   await expect(page.getByTestId('race-countdown')).toBeVisible()
   await shot(page, '10-race-countdown')
 

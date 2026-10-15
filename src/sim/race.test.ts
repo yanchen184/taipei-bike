@@ -1,11 +1,13 @@
 import { describe, expect, test } from 'vitest'
 import {
   COUNTDOWN_MS,
+  PREP_MS,
   FINISH_GRACE_MS,
   RACE_LIMIT_MS,
   aiLimit,
   aiName,
   goTime,
+  prepEnd,
   firstFinish,
   raceOver,
   racePhase,
@@ -15,7 +17,7 @@ import {
 } from './race'
 
 const meta: RaceMeta = { n: 1, ai: 2, cps: 6, at: 1_000_000, entrants: { u1: 0, u2: 1 } }
-const GO = meta.at + COUNTDOWN_MS
+const GO = meta.at + PREP_MS + COUNTDOWN_MS
 
 describe('G3 名次', () => {
   test('[G3-2] 完成者依完成時間，未完成者依檢查點數、再依離下一檢查點的距離', () => {
@@ -37,6 +39,23 @@ describe('G3 名次', () => {
   })
 })
 
+describe('W1 整備', () => {
+  test('[W1-3] 連線整備固定 20 秒後進入 3 秒倒數；單人按「出發」前一直在整備，按下後倒數 3 秒', () => {
+    expect(racePhase(meta, [], undefined, meta.at)).toBe('prep')
+    expect(racePhase(meta, [], undefined, meta.at + PREP_MS - 1)).toBe('prep')
+    expect(racePhase(meta, [], undefined, meta.at + PREP_MS)).toBe('countdown')
+    expect(prepEnd(meta)).toBe(meta.at + 20_000)
+
+    const waiting: RaceMeta = { ...meta, ready: null }
+    expect(racePhase(waiting, [], undefined, meta.at + RACE_LIMIT_MS * 10)).toBe('prep')
+    expect(raceOver(waiting, [], undefined, meta.at + RACE_LIMIT_MS * 10)).toBe(false)
+    const ready: RaceMeta = { ...meta, ready: meta.at + 50_000 }
+    expect(racePhase(ready, [], undefined, meta.at + 50_000)).toBe('countdown')
+    expect(goTime(ready)).toBe(meta.at + 53_000)
+    expect(racePhase(ready, [], undefined, meta.at + 53_000)).toBe('racing')
+  })
+})
+
 describe('G4 比賽結束', () => {
   const running: Standing[] = [
     { id: 'u1', cp: 2, dist: 40 },
@@ -45,7 +64,7 @@ describe('G4 比賽結束', () => {
   ]
 
   test('[G4-1] 所有選手完成、第一位完成後 30 秒、開賽後 5 分鐘，三者先到者結束比賽', () => {
-    expect(racePhase(meta, running, undefined, meta.at)).toBe('countdown')
+    expect(racePhase(meta, running, undefined, meta.at + PREP_MS)).toBe('countdown')
     expect(racePhase(meta, running, undefined, GO - 1)).toBe('countdown')
     expect(goTime(meta)).toBe(GO)
     expect(racePhase(meta, running, undefined, GO)).toBe('racing')

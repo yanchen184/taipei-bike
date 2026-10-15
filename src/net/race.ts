@@ -1,17 +1,18 @@
 import { onValue, ref, runTransaction, serverTimestamp, set, update, type Database } from 'firebase/database'
 import type { RaceChannel } from '../game/online'
 import { EMPTY_RACE, type RaceSnapshot } from '../modes/race/link'
-import type { AiNet, Progress, RaceMeta } from '../sim/race'
+import type { AiNet, BuildNet, Progress, RaceMeta } from '../sim/race'
 
 interface RaceNode {
   meta?: RaceMeta
   progress?: Record<string, Progress>
   ai?: Record<string, AiNet>
+  build?: Record<string, BuildNet>
 }
 
 function readRace(node: RaceNode | null): RaceSnapshot {
   if (!node) return EMPTY_RACE
-  return { meta: node.meta ?? null, progress: node.progress ?? {}, ai: node.ai ?? {} }
+  return { meta: node.meta ?? null, progress: node.progress ?? {}, ai: node.ai ?? {}, build: node.build ?? {} }
 }
 
 /** 房間的 race 節點；完成時間一律由伺服器蓋上 */
@@ -59,6 +60,10 @@ export function createRaceChannel(db: Database, roomPath: string, uid: string): 
         if (fin !== undefined && !finStored) paths[`ai/${k}/fin`] = serverTimestamp()
       }
       return update(raceRef, paths)
+    },
+
+    sendBuild(build) {
+      return set(ref(db, `${roomPath}/race/build/${uid}`), build)
     },
   }
 }

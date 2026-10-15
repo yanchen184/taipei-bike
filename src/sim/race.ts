@@ -1,3 +1,7 @@
+import type { Build } from './parts'
+
+/** 連線的整備時間（§12-7）；單人沒有時間限制 */
+export const PREP_MS = 20_000
 export const COUNTDOWN_MS = 3000
 export const FINISH_GRACE_MS = 30_000
 export const RACE_LIMIT_MS = 300_000
@@ -15,7 +19,14 @@ export interface RaceMeta {
   at: number
   /** 參賽玩家 uid → 起跑格 */
   entrants: Record<string, number>
+  /**
+   * 單人按「出發」的時間，還沒按時為 null；連線沒有這個欄位，整備固定 PREP_MS
+   */
+  ready?: number | null
 }
+
+/** 一位選手本局的組裝 */
+export type BuildNet = Build & { n: number }
 
 /** fin：完成的伺服器時間 */
 export interface Progress {
@@ -44,11 +55,17 @@ export interface Standing {
   dist: number
 }
 
-export type RacePhase = 'countdown' | 'racing' | 'over'
+export type RacePhase = 'prep' | 'countdown' | 'racing' | 'over'
+
+/** 整備結束、開始起跑倒數的伺服器時間；單人還沒按「出發」時為 Infinity */
+export function prepEnd(meta: RaceMeta): number {
+  if (meta.ready === undefined) return meta.at + PREP_MS
+  return meta.ready ?? Infinity
+}
 
 /** 倒數結束、開始計時的伺服器時間 */
 export function goTime(meta: RaceMeta): number {
-  return meta.at + COUNTDOWN_MS
+  return prepEnd(meta) + COUNTDOWN_MS
 }
 
 function compare(a: Standing, b: Standing): number {
@@ -83,6 +100,7 @@ export function raceOver(meta: RaceMeta, standings: readonly Standing[], firstFi
 }
 
 export function racePhase(meta: RaceMeta, standings: readonly Standing[], firstFin: number | undefined, now: number): RacePhase {
+  if (now < prepEnd(meta)) return 'prep'
   if (now < goTime(meta)) return 'countdown'
   return raceOver(meta, standings, firstFin, now) ? 'over' : 'racing'
 }

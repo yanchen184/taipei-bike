@@ -22,7 +22,7 @@
 | W2-1~W2-3 | `sim/parts.test.ts`、`sim/vehicle.test.ts` |
 | W3-1 | `tests/e2e/race-online.spec.ts`：兩邊成績表的組裝欄一致 |
 | W5-1, W5-2 | `sim/balance.test.ts`：多個 seed、所有合法組裝 |
-| A2-1~A2-4 | `sim/ai.test.ts` |
+| A2-1~A2-4 | `sim/balance.test.ts`（與 W5 共用所有合法組裝的模擬） |
 | N3-1, N3-2 | Emulator：`tests/emu/race-rules.test.ts` |
 | B1-1、G1-1、N2-1、N2-3、P1-1、P1-2 | 既有測試依新條文更新 |
 

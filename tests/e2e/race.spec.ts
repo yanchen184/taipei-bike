@@ -16,10 +16,17 @@ function hasObject(page: Page, name: string): Promise<boolean> {
   return page.evaluate((n) => window.__taipei!.hasObject(n), name)
 }
 
-/** 單人開一局，等到倒數結束 */
-async function startRace(page: Page, ai: number): Promise<DebugRace> {
+/** 單人開一局，進到整備站 */
+async function openWorkshop(page: Page, ai: number): Promise<void> {
   await page.getByTestId('race-ai-count').selectOption(String(ai))
   await page.getByTestId('race-start').click()
+  await expect(page.getByTestId('race-workshop')).toBeVisible()
+}
+
+/** 單人開一局，在整備站直接按「出發」，等到倒數結束 */
+async function startRace(page: Page, ai: number): Promise<DebugRace> {
+  await openWorkshop(page, ai)
+  await page.getByTestId('race-go').click()
   await expect(page.getByTestId('race-cp')).toBeVisible()
   await expect.poll(async () => (await race(page))?.view.phase, { timeout: 8_000 }).toBe('racing')
   return currentRace(page)
@@ -48,8 +55,8 @@ test.describe('G1 開賽', () => {
     const options = await page.getByTestId('race-ai-count').locator('option').allTextContents()
     expect(options).toEqual(['0', '1', '2', '3', '4', '5'])
 
-    await page.getByTestId('race-ai-count').selectOption('3')
-    await page.getByTestId('race-start').click()
+    await openWorkshop(page, 3)
+    await page.getByTestId('race-go').click()
     await expect(page.getByTestId('race-countdown')).toBeVisible()
 
     const r = await currentRace(page)
@@ -67,9 +74,9 @@ test.describe('G1 開賽', () => {
 test.describe('G2 倒數與騎行', () => {
   test('[G2-1] 倒數中按 W 不會移動，倒數結束後可以騎', async ({ page }) => {
     await startSolo(page)
-    await page.getByTestId('race-ai-count').selectOption('0')
+    await openWorkshop(page, 0)
     await page.keyboard.down('w')
-    await page.getByTestId('race-start').click()
+    await page.getByTestId('race-go').click()
     // 在頁面內逐幀取樣，避免每次 evaluate 的延遲跨過 3 秒倒數
     const samples = await page.evaluate(
       () =>
@@ -143,8 +150,8 @@ test.describe('G2 倒數與騎行', () => {
 
   test('[G2-5] 倒數時排在後一格的 AI 半透明，不擋住自己', async ({ page }) => {
     await startSolo(page)
-    await page.getByTestId('race-ai-count').selectOption('1')
-    await page.getByTestId('race-start').click()
+    await openWorkshop(page, 1)
+    await page.getByTestId('race-go').click()
     await expect(page.getByTestId('race-countdown')).toBeVisible()
     const r = await currentRace(page)
     expect(r.slot).toBe(0)
@@ -290,5 +297,126 @@ test.describe('G5 導航', () => {
     await expect(page.getByTestId('race-lobby')).toBeVisible()
     await expect(page.getByTestId('race-minimap')).toHaveCount(0)
     await expect(page.getByTestId('race-turn')).toHaveCount(0)
+  })
+})
+
+/** 整備站裡某個零件的按鈕 */
+function part(page: Page, slot: string, id: string) {
+  return page.locator(`[data-testid="workshop-part"][data-slot="${slot}"][data-id="${id}"]`)
+}
+
+test.describe('W1 整備站', () => {
+  test('[W1-1] 開始比賽後進入整備站，看到本局賽道預覽：路線、起點、檢查點、轉彎數、最長直線', async ({ page }, testInfo) => {
+    await startSolo(page)
+    await openWorkshop(page, 2)
+    const r = await currentRace(page)
+    expect(r.view.phase).toBe('prep')
+    const map = page.getByTestId('workshop-map')
+    await expect(map).toBeVisible()
+    await expect(map.getByTestId('workshop-route')).toHaveCount(1)
+    await expect(map.getByTestId('workshop-start')).toHaveCount(1)
+    await expect(map.getByTestId('workshop-checkpoint')).toHaveCount(r.checkpoints.length)
+    const turns = r.nodes.slice(1, -1).filter((_, k) => turnAt(r.nodes, k + 1) !== 'straight').length
+    await expect(page.getByTestId('workshop-turns')).toHaveText(String(turns))
+    await expect(page.getByTestId('workshop-longest')).toHaveText(/^\d+$/)
+    // 整備時不在場景裡騎車：沒有 HUD 的檢查點與小地圖
+    await expect(page.getByTestId('race-cp')).toHaveCount(0)
+    await expect(page.getByTestId('race-minimap')).toHaveCount(0)
+    await page.screenshot({ path: testInfo.outputPath('workshop.png') })
+  })
+
+  test('[W1-2] 每個部位只能選一款，超過預算的組合不能選，剩餘預算即時更新', async ({ page }) => {
+    await startSolo(page)
+    await openWorkshop(page, 0)
+    const budget = page.getByTestId('workshop-budget')
+    // 預設鋁合金 300 + 通勤輪 100 + 輕齒比 300 + 短龍頭 200 = 900
+    await expect(budget).toHaveText('100')
+    await expect(page.locator('[data-testid="workshop-part"][aria-pressed="true"]')).toHaveCount(4)
+    // 換碳纖會變成 1100，超過預算
+    await expect(part(page, 'frame', 'carbon')).toBeDisabled()
+
+    await part(page, 'bar', 'flat').click()
+    await expect(part(page, 'bar', 'flat')).toHaveAttribute('aria-pressed', 'true')
+    await expect(part(page, 'bar', 'stem')).toHaveAttribute('aria-pressed', 'false')
+    await expect(budget).toHaveText('200')
+    await part(page, 'frame', 'carbon').click()
+    await expect(part(page, 'frame', 'carbon')).toHaveAttribute('aria-pressed', 'true')
+    await expect(part(page, 'frame', 'alloy')).toHaveAttribute('aria-pressed', 'false')
+    await expect(budget).toHaveText('0')
+    await expect(part(page, 'wheel', 'slick')).toBeDisabled()
+    await expect(part(page, 'bar', 'stem')).toBeDisabled()
+    expect((await currentRace(page)).view.build).toEqual({ frame: 'carbon', wheel: 'commuter', drive: 'short', bar: 'flat' })
+  })
+
+  test('[W1-3] 單人按「出發」前一直在整備站，按了才進入 3 秒倒數', async ({ page }) => {
+    await startSolo(page)
+    await openWorkshop(page, 0)
+    await expect(page.getByTestId('race-prep-left')).toHaveCount(0)
+    await page.waitForTimeout(4000)
+    expect((await currentRace(page)).view.phase).toBe('prep')
+    // 在頁面內逐幀記下 phase 與倒數畫面，避免每次 evaluate 的延遲跨過 3 秒倒數
+    const frames = page.evaluate(
+      () =>
+        new Promise<{ t: number; phase: string; shown: boolean }[]>((resolve) => {
+          const out: { t: number; phase: string; shown: boolean }[] = []
+          const tick = () => {
+            const phase = window.__taipei!.race()!.view.phase
+            out.push({ t: performance.now(), phase, shown: document.querySelector('[data-testid="race-countdown"]') !== null })
+            if (phase === 'racing' || out.length > 5000) resolve(out)
+            else requestAnimationFrame(tick)
+          }
+          tick()
+        }),
+    )
+    await page.getByTestId('race-go').click()
+    const seen = await frames
+    const countdown = seen.filter((f) => f.phase === 'countdown')
+    expect(countdown.length).toBeGreaterThan(1)
+    expect(countdown.some((f) => f.shown)).toBe(true)
+    expect(seen.at(-1)!.phase).toBe('racing')
+    expect(seen.at(-1)!.t - countdown[0]!.t).toBeGreaterThan(2500)
+    await expect(page.getByTestId('race-workshop')).toHaveCount(0)
+  })
+
+  test('[W1-4] 整備完的組裝存進存檔，下一局與重新整理後都帶入', async ({ page }) => {
+    await startSolo(page)
+    await openWorkshop(page, 0)
+    await part(page, 'drive', 'tall').click()
+    await part(page, 'bar', 'drop').click()
+    const build = { frame: 'alloy', wheel: 'commuter', drive: 'tall', bar: 'drop' }
+    expect((await currentRace(page)).view.build).toEqual(build)
+    await page.getByTestId('race-go').click()
+    await page.getByTestId('race-quit').click()
+    await expect(page.getByTestId('race-lobby')).toBeVisible()
+
+    await openWorkshop(page, 0)
+    await expect(part(page, 'drive', 'tall')).toHaveAttribute('aria-pressed', 'true')
+    await expect(part(page, 'bar', 'drop')).toHaveAttribute('aria-pressed', 'true')
+
+    await page.reload()
+    await page.getByTestId('start-solo').click()
+    await expect(page.getByTestId('race-lobby')).toBeVisible()
+    await page.waitForFunction(() => window.__taipei !== undefined)
+    await openWorkshop(page, 0)
+    expect((await currentRace(page)).view.build).toEqual(build)
+  })
+})
+
+test.describe('W3 成績表組裝', () => {
+  test('[W3-1] 成績表每位選手顯示四個零件名稱，AI 也顯示', async ({ page }) => {
+    test.setTimeout(120_000)
+    await startSolo(page, '小明')
+    await openWorkshop(page, 1)
+    await part(page, 'bar', 'flat').click()
+    await part(page, 'frame', 'carbon').click()
+    await page.getByTestId('race-go').click()
+    await expect.poll(async () => (await currentRace(page)).view.phase, { timeout: 8_000 }).toBe('racing')
+    const r = await currentRace(page)
+    await passCheckpoints(page, 0, r.checkpoints.length)
+    await expect(page.getByTestId('race-results')).toBeVisible({ timeout: 45_000 })
+    const builds = page.getByTestId('race-result-build')
+    await expect(builds).toHaveCount(2)
+    await expect(builds.nth(0)).toHaveText('碳纖＋通勤輪＋輕齒比＋平把')
+    await expect(builds.nth(1)).toHaveText(/^[^＋]+(＋[^＋]+){3}$/)
   })
 })

@@ -40,7 +40,7 @@ function setCircle(el: SVGCircleElement | null | undefined, pos: Vec2 | undefine
   el.setAttribute('cy', String(pos.z))
 }
 
-function Roads() {
+export function Roads() {
   const roads = useEngine().city.roads
   return (
     <g fill="rgba(255,255,255,0.18)">

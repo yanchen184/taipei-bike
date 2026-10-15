@@ -39,11 +39,25 @@ async function roomOfTwo(page: Page, guest: Page): Promise<string> {
   return code
 }
 
-/** 房主開一局，等到所有 pages 都進入騎行階段 */
-async function startRace(host: Page, ai: number, pages: Page[]): Promise<void> {
+/** 整備 20 秒＋倒數 3 秒，再加上同步延遲的餘裕 */
+const TO_RACING_MS = 35_000
+
+/** 房主開一局，等到所有 pages 都進入整備站 */
+async function openWorkshop(host: Page, ai: number, pages: Page[]): Promise<void> {
   await host.getByTestId('race-ai-count').selectOption(String(ai))
   await host.getByTestId('race-start').click()
-  for (const p of pages) await expect.poll(async () => (await race(p))?.view.phase, { timeout: 10_000 }).toBe('racing')
+  for (const p of pages) await expect(p.getByTestId('race-workshop')).toBeVisible()
+}
+
+/** 房主開一局，等整備結束、所有 pages 都進入騎行階段 */
+async function startRace(host: Page, ai: number, pages: Page[]): Promise<void> {
+  await openWorkshop(host, ai, pages)
+  for (const p of pages) await expect.poll(async () => (await race(p))?.view.phase, { timeout: TO_RACING_MS }).toBe('racing')
+}
+
+/** 整備站裡某個零件的按鈕 */
+function part(page: Page, slot: string, id: string) {
+  return page.locator(`[data-testid="workshop-part"][data-slot="${slot}"][data-id="${id}"]`)
 }
 
 /** 瞬移通過每個檢查點直到完成 */
@@ -89,6 +103,9 @@ test.describe('G1 開賽（連線）', () => {
 })
 
 test.describe('N1 比賽同步（兩個 browser context）', () => {
+  // 每一局都要先整備 20 秒
+  test.describe.configure({ timeout: 120_000 })
+
   test('[N1-1] 同一局賽道相同、看得到對方騎車、成績表名次一致', async ({ page, guest }, testInfo) => {
     test.setTimeout(120_000)
     await roomOfTwo(page, guest)
@@ -183,5 +200,59 @@ test.describe('N1 比賽同步（兩個 browser context）', () => {
       await expectBikeShown(late, name)
     }
     expect((await currentRace(page)).view.total).toBe(2)
+  })
+})
+
+test.describe('W1 整備站（連線）', () => {
+  test('[W1-3] 連線時沒有「出發」，顯示整備倒數，20 秒後所有人同時進入倒數', async ({ page, guest }) => {
+    test.setTimeout(90_000)
+    await roomOfTwo(page, guest)
+    await openWorkshop(page, 1, [page, guest])
+    for (const p of [page, guest]) {
+      await expect(p.getByTestId('race-go')).toHaveCount(0)
+      await expect(p.getByTestId('race-prep-left')).toContainText(/整備剩 (1\d|20) 秒/)
+    }
+    // 兩邊在頁面內逐幀記下進入倒數的時刻（epoch ms）
+    const countdownAt = (p: Page) =>
+      p.evaluate(
+        () =>
+          new Promise<number>((resolve) => {
+            const tick = () => (window.__taipei!.race()?.view.phase === 'countdown' ? resolve(Date.now()) : requestAnimationFrame(tick))
+            tick()
+          }),
+      )
+    const opened = Date.now()
+    const [h, g] = await Promise.all([countdownAt(page), countdownAt(guest)])
+    expect(Math.abs(h - g)).toBeLessThan(1000)
+    expect(h - opened).toBeGreaterThan(12_000)
+    for (const p of [page, guest]) await expect(p.getByTestId('race-workshop')).toHaveCount(0)
+  })
+})
+
+test.describe('W3 成績表組裝（連線）', () => {
+  test('[W3-1] 兩個瀏覽器的成績表組裝欄一致，包含對方與 AI 的組裝', async ({ page, guest }) => {
+    test.setTimeout(150_000)
+    await roomOfTwo(page, guest)
+    await openWorkshop(page, 1, [page, guest])
+    await part(guest, 'bar', 'flat').click()
+    await part(guest, 'frame', 'carbon').click()
+    await part(page, 'drive', 'tall').click()
+    await expect.poll(async () => (await currentRace(guest)).view.build.frame).toBe('carbon')
+    for (const p of [page, guest]) await expect.poll(async () => (await race(p))?.view.phase, { timeout: TO_RACING_MS }).toBe('racing')
+
+    await finish(page)
+    await finish(guest)
+    for (const p of [page, guest]) await expect(p.getByTestId('race-results')).toBeVisible({ timeout: 45_000 })
+    const builds = (p: Page) => p.getByTestId('race-result-build').allInnerTexts()
+    await expect.poll(async () => {
+      const [h, g] = await Promise.all([builds(page), builds(guest)])
+      return h.join('\n') === g.join('\n') ? h : null
+    }, { timeout: 45_000 }).not.toBeNull()
+    const rows = await page.getByTestId('race-result-row').allInnerTexts()
+    const hostBuilds = await builds(page)
+    expect(hostBuilds).toHaveLength(3)
+    expect(hostBuilds[rows.findIndex((r) => r.includes('阿明'))]).toBe('鋁合金＋通勤輪＋重齒比＋短龍頭')
+    expect(hostBuilds[rows.findIndex((r) => r.includes('小美'))]).toBe('碳纖＋通勤輪＋輕齒比＋平把')
+    expect(hostBuilds[rows.findIndex((r) => r.includes('AI 1'))]).toMatch(/^[^＋]+(＋[^＋]+){3}$/)
   })
 })

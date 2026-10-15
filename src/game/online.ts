@@ -1,6 +1,6 @@
 import type { RaceSnapshot } from '../modes/race/link'
 import type { PlayerState } from '../sim/player'
-import type { AiNet, Progress } from '../sim/race'
+import type { AiNet, BuildNet, Progress } from '../sim/race'
 import {
   OUTDOOR,
   SEND_INTERVAL,
@@ -35,6 +35,7 @@ export interface RaceChannel {
   start(ai: number, cpsOf: (n: number) => number, entrants: Record<string, number>): Promise<void>
   sendProgress(p: Progress): Promise<void>
   sendAi(ai: Readonly<Record<string, AiNet>>): Promise<void>
+  sendBuild(build: BuildNet): Promise<void>
 }
 
 /** 已加入的房間；由 net 層實作 */

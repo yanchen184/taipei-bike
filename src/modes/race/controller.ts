@@ -1,6 +1,8 @@
 import type { Action, EngineHooks, GameEngine, GameState } from '../../game/engine'
-import { AI_STEP, createAi, riderCircles, stepAi, type AiRider } from '../../sim/ai'
+import { AI_STEP, aiDriver, createAi, riderCircles, stepAi, type AiDriver, type AiRider } from '../../sim/ai'
+import { aiBuild } from '../../sim/balance'
 import { advanceCheckpoint, distanceToNext, generateCourse, nextTurn, respawnPose, type Course, type TurnKind } from '../../sim/course'
+import { DEFAULT_BUILD, bikeSpec, buildLabel, swapPart, type Build, type PartSlot } from '../../sim/parts'
 import {
   MAX_RACERS,
   aiId,
@@ -8,6 +10,7 @@ import {
   aiName,
   firstFinish,
   goTime,
+  prepEnd,
   racePhase,
   rankRacers,
   type AiNet,
@@ -17,7 +20,7 @@ import {
   type Standing,
 } from '../../sim/race'
 import { INTERP_DELAY, INTERP_KEEP, lerpAngle } from '../../sim/sync'
-import type { Vec2 } from '../../sim/types'
+import type { Pose, Vec2 } from '../../sim/types'
 import { EMPTY_RACE, type RaceLink, type RaceSnapshot } from './link'
 
 /** 房主上傳 AI 的最短間隔（毫秒） */
@@ -33,6 +36,8 @@ export interface ResultRow {
   rank: number
   id: string
   name: string
+  /** 四個零件名稱；不知道時為 null */
+  build: string | null
   /** 從倒數結束到完成的毫秒數；未完成為 null */
   time: number | null
 }
@@ -42,6 +47,10 @@ export interface RaceView {
   /** 本局 AI 台數 */
   ais: number
   phase: RacePhase
+  /** 連線整備剩下的秒數（無條件進位）；單人整備沒有時間限制、或不在整備時為 null */
+  prepLeft: number | null
+  /** 自己這一局的組裝 */
+  build: Build
   /** 倒數剩下的秒數（無條件進位）；倒數結束後為 0 */
   countdown: number
   cp: number
@@ -88,6 +97,15 @@ interface Round {
   sentCp: number
   /** 完成或比賽結束後腳踏車已停下 */
   stopped: boolean
+  /** 自己在整備站選的組裝 */
+  build: Build
+  /** 組裝有伺服器還沒確認的變動 */
+  buildDirty: boolean
+  /** 目前騎的腳踏車用的組裝 */
+  ridden: Build | null
+  /** 每台 AI 本局的組裝與騎法，由 seed＋局數決定，所有人算出來一樣 */
+  aiBuilds: Build[]
+  drivers: AiDriver[]
   /** 自己當房主時推進的 AI；aiLive 為 false 時內容過期，改用同步資料 */
   ais: AiRider[]
   aiFin: (number | undefined)[]
@@ -102,6 +120,8 @@ const IDLE_VIEW: RaceView = {
   n: 0,
   ais: 0,
   phase: 'countdown',
+  prepLeft: null,
+  build: DEFAULT_BUILD,
   countdown: 0,
   cp: 0,
   cps: 0,
@@ -119,6 +139,10 @@ function viewEqual(a: RaceView, b: RaceView): boolean {
   return (Object.keys(a) as (keyof RaceView)[]).every((k) =>
     k === 'results' ? JSON.stringify(a.results) === JSON.stringify(b.results) : a[k] === b[k],
   )
+}
+
+function sameBuild(a: Build, b: Build): boolean {
+  return a.frame === b.frame && a.wheel === b.wheel && a.drive === b.drive && a.bar === b.bar
 }
 
 /** 起跑格中沒有分給玩家的格子，依序給 AI */
@@ -160,6 +184,7 @@ export class RaceController {
   private active = false
   private sending = false
   private sendingAi = false
+  private sendingBuild = false
   /** 開新一局等待伺服器確認中；這段期間寫入比賽資料會讓開局的 transaction 中止 */
   private starting = false
   private current: RaceView = IDLE_VIEW
@@ -233,6 +258,23 @@ export class RaceController {
     return this.start(this.snap.meta?.ai ?? 0)
   }
 
+  /** 整備時換零件；換了會超過預算時不做事。組裝立即存檔，下一局帶入 */
+  pickPart(slot: PartSlot, id: string): void {
+    const r = this.round
+    if (!r || r.slot === null || this.phase() !== 'prep') return
+    const build = swapPart(r.build, slot, id)
+    if (!build) return
+    this.engine.setBuild(build)
+    this.round = { ...r, build, buildDirty: true }
+    this.mountGrid()
+    this.refresh()
+  }
+
+  /** 單人按「出發」：結束整備，進入起跑倒數 */
+  go(): void {
+    this.link.ready().catch((error: unknown) => this.report(error))
+  }
+
   /** 回到城市或退出比賽；退出的這一局記為未完成 */
   leave(): void {
     this.options.switchMode(false)
@@ -243,7 +285,36 @@ export class RaceController {
     this.active = true
     this.engine.setHooks(this.hooks)
     const r = this.round
-    if (r && r.slot !== null) this.engine.mountBike(respawnPose(r.course, r.cp, r.slot))
+    if (r && r.slot !== null) this.mount(r, respawnPose(r.course, r.cp, r.slot))
+  }
+
+  /** 騎上腳踏車，性能依這一局要用的組裝 */
+  private mount(r: Round, pose: Pose): void {
+    const ridden = this.rideBuild(r)
+    this.round = { ...r, ridden }
+    this.engine.mountBike(pose, bikeSpec(ridden))
+  }
+
+  /** 整備與倒數時組裝變了：在起跑格換上新的腳踏車 */
+  private mountGrid(): void {
+    const r = this.round
+    if (!r || r.slot === null || !this.active) return
+    const ridden = this.rideBuild(r)
+    if (r.ridden && sameBuild(r.ridden, ridden)) return
+    this.mount(r, r.course.grid[r.slot]!)
+  }
+
+  /** 整備時用自己剛選的；整備結束後用伺服器上的，其他人看到的就是自己騎的 */
+  private rideBuild(r: Round, phase = this.phase()): Build {
+    if (phase === 'prep') return r.build
+    return this.confirmedBuild(r, this.link.selfId) ?? r.build
+  }
+
+  private confirmedBuild(r: Round, id: string): Build | undefined {
+    const b = this.snap.build[id]
+    if (b?.n !== r.meta.n) return undefined
+    const { n: _, ...build } = b
+    return build
   }
 
   /** 競速模式的 onExit：只留背景掛點，下車站在腳踏車旁 */
@@ -304,7 +375,7 @@ export class RaceController {
     const meta = snap.meta
     if (!meta && this.round) this.dropRound()
     else if (meta && meta.n !== this.round?.meta.n) this.beginRound(meta)
-    else if (meta && this.round && meta.n === this.round.meta.n && meta.at !== this.round.meta.at) this.round = { ...this.round, meta }
+    else if (meta && this.round && (meta.at !== this.round.meta.at || meta.ready !== this.round.meta.ready)) this.round = { ...this.round, meta }
     this.recordAiSamples()
     this.refresh()
   }
@@ -334,10 +405,16 @@ export class RaceController {
     const course = generateCourse(this.engine.city, meta.n)
     const slot = meta.entrants[this.link.selfId] ?? null
     const host = this.link.isHost()
+    const aiBuilds = aiSlots(meta).map((_, k) => aiBuild(course, this.engine.city.seed, k))
     this.aiSamples = new Map()
     this.round = {
       meta,
       course,
+      build: this.engine.state.save.build,
+      buildDirty: slot !== null,
+      ridden: null,
+      aiBuilds,
+      drivers: aiBuilds.map((build, k) => aiDriver(k, build)),
       slot,
       cp: 0,
       sentCp: 0,
@@ -351,7 +428,7 @@ export class RaceController {
     }
     if (slot === null) {
       if (this.active) this.options.switchMode(false)
-    } else if (this.active) this.engine.mountBike(course.grid[slot]!)
+    } else if (this.active) this.mount(this.round, course.grid[slot]!)
     else this.options.switchMode(true)
   }
 
@@ -368,7 +445,7 @@ export class RaceController {
   private handleAction(action: Action): boolean {
     const r = this.round
     if (action === 'reset') {
-      if (r && r.slot !== null && this.canRide()) this.engine.mountBike(respawnPose(r.course, r.cp, r.slot))
+      if (r && r.slot !== null && this.canRide()) this.mount(r, respawnPose(r.course, r.cp, r.slot))
       return true
     }
     return BLOCKED_ACTIONS.includes(action)
@@ -379,7 +456,9 @@ export class RaceController {
     if (!r) return
     const now = this.link.serverNow()
     const phase = this.phase(now)
-    if (this.active) this.rideStep(r, state.player, phase, now)
+    if (phase === 'prep' || phase === 'countdown') this.mountGrid()
+    if (this.active) this.rideStep(this.round!, state.player, phase, now)
+    if (phase === 'prep') this.sendBuild()
     this.sendProgress()
     this.takeOverAis()
     if (this.simulatingAis(this.round!)) {
@@ -430,6 +509,23 @@ export class RaceController {
     return { ais, aiFin: synced.map((a) => a?.fin) }
   }
 
+  /** 一次只送一筆，送的是當下最新的組裝；失敗時下次重送；開新一局等待確認時暫停 */
+  private sendBuild(): void {
+    const r = this.round
+    if (!r || !r.buildDirty || r.slot === null || this.starting || this.sendingBuild) return
+    this.round = { ...r, buildDirty: false }
+    this.sendingBuild = true
+    this.link
+      .sendBuild({ n: r.meta.n, ...r.build })
+      .catch((error: unknown) => {
+        if (this.round?.meta.n === r.meta.n) this.round = { ...this.round, buildDirty: true }
+        this.report(error)
+      })
+      .finally(() => {
+        this.sendingBuild = false
+      })
+  }
+
   /** 依序上傳：一次只送一筆，每筆比伺服器已確認的多一個檢查點；開新一局等待確認時暫停 */
   private sendProgress(): void {
     const r = this.round
@@ -460,7 +556,7 @@ export class RaceController {
       clock -= AI_STEP
       ais = ais.map((ai, k) => {
         const others = ais.filter((_, j) => j !== k).map((o) => ({ pos: o.bike.pos, fin: o.fin }))
-        const next = stepAi(ai, k, r.course, AI_STEP, this.engine.city.colliders, [...riderCircles([...humans, ...others]), ...traffic])
+        const next = stepAi(ai, r.drivers[k]!, r.course, AI_STEP, this.engine.city.colliders, [...riderCircles([...humans, ...others]), ...traffic])
         if (next.fin && aiFin[k] === undefined) aiFin[k] = now
         return next
       })
@@ -544,6 +640,14 @@ export class RaceController {
     return this.theirProgress(r, this.link.selfId)?.fin ?? r.fin
   }
 
+  /** 成績表的組裝：AI 用本局配的，玩家用伺服器上的，自己還沒確認時用自己選的 */
+  private buildOf(r: Round, id: string): string | null {
+    const k = r.aiBuilds.findIndex((_, j) => aiId(j) === id)
+    if (k >= 0) return buildLabel(r.aiBuilds[k]!)
+    const build = this.confirmedBuild(r, id) ?? (id === this.link.selfId ? r.build : undefined)
+    return build ? buildLabel(build) : null
+  }
+
   private nameOf(id: string): string {
     const k = Array.from({ length: MAX_RACERS }, (_, j) => j).find((j) => aiId(j) === id)
     if (k !== undefined) return aiName(k)
@@ -568,6 +672,8 @@ export class RaceController {
       n: r.meta.n,
       ais: r.meta.ai,
       phase,
+      prepLeft: phase === 'prep' && r.meta.ready === undefined ? Math.ceil((prepEnd(r.meta) - now) / 1000) : null,
+      build: r.build,
       countdown: phase === 'countdown' ? Math.ceil((go - now) / 1000) : 0,
       cp: r.cp,
       cps: r.course.checkpoints.length,
@@ -578,7 +684,13 @@ export class RaceController {
       host: this.link.isHost(),
       results:
         phase === 'over'
-          ? ranked.map((s, k) => ({ rank: k + 1, id: s.id, name: this.nameOf(s.id), time: s.fin === undefined ? null : s.fin - go }))
+          ? ranked.map((s, k) => ({
+              rank: k + 1,
+              id: s.id,
+              name: this.nameOf(s.id),
+              build: this.buildOf(r, s.id),
+              time: s.fin === undefined ? null : s.fin - go,
+            }))
           : null,
       turn: turn?.kind ?? null,
       turnDist: turn ? Math.round(turn.dist / TURN_STEP) * TURN_STEP : 0,

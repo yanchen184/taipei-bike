@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'vitest'
 import { GameEngine, type Storage } from '../../game/engine'
+import { aiBuild } from '../../sim/balance'
 import { checkpointPos, generateCourse, nodePose } from '../../sim/course'
-import { goTime, type Progress, type RaceMeta } from '../../sim/race'
+import { DEFAULT_BUILD, bikeSpec, buildLabel } from '../../sim/parts'
+import { COUNTDOWN_MS, PREP_MS, goTime, type Progress, type RaceMeta } from '../../sim/race'
 import { INTERP_DELAY } from '../../sim/sync'
 import type { Vec2 } from '../../sim/types'
 import { BIKE_SPEC } from '../../sim/vehicle'
@@ -17,11 +19,23 @@ function memoryStorage(): Storage {
   return { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) }
 }
 
+/** 單人的連結，開局後立刻按「出發」，不經過整備 */
+function quickLink(now: () => number): RaceLink {
+  const base = localRaceLink('me', '阿明', now)
+  return {
+    ...base,
+    async start(ai, cpsOf) {
+      await base.start(ai, cpsOf)
+      await base.ready()
+    },
+  }
+}
+
 function setup(link?: (now: () => number) => RaceLink, onError?: (error: Error) => void) {
   let t = 1_000_000
   const now = () => t
   const engine = new GameEngine({ seed: 3, name: '阿明', storage: memoryStorage(), now })
-  const raceLink = link?.(now) ?? localRaceLink('me', '阿明', now)
+  const raceLink = link?.(now) ?? quickLink(now)
   let inRace = false
   const controller: RaceController = new RaceController({
     engine,
@@ -79,8 +93,8 @@ function twoPlayerLink(now: () => number) {
     },
     async start(ai, cpsOf) {
       const n = (snap.meta?.n ?? 0) + 1
-      const meta: RaceMeta = { n, ai, cps: cpsOf(n), at: now(), entrants: { me: 0, other: 1 } }
-      publish({ meta, progress: {}, ai: {} })
+      const meta: RaceMeta = { n, ai, cps: cpsOf(n), at: now(), entrants: { me: 0, other: 1 }, ready: now() }
+      publish({ meta, progress: {}, ai: {}, build: {} })
     },
     async sendProgress(p) {
       publish({ ...snap, progress: { ...snap.progress, me: p } })
@@ -88,6 +102,10 @@ function twoPlayerLink(now: () => number) {
     async sendAi(ai) {
       publish({ ...snap, ai })
     },
+    async sendBuild(build) {
+      publish({ ...snap, build: { ...snap.build, me: build } })
+    },
+    ready: async () => undefined,
   }
   return {
     link,
@@ -99,8 +117,11 @@ function twoPlayerLink(now: () => number) {
   }
 }
 
-/** 共用記憶體的房間：房內第一位是房主，房內玩家依序排起跑格；aiWriters 記錄寫過 AI 的玩家 */
-function memoryRoom(now: () => number, initial: readonly RaceEntrant[]) {
+/**
+ * 共用記憶體的房間：房內第一位是房主，房內玩家依序排起跑格；aiWriters 記錄寫過 AI 的玩家。
+ * timed 為 true 時跟連線一樣整備固定 PREP_MS，否則開局後立刻結束整備
+ */
+function memoryRoom(now: () => number, initial: readonly RaceEntrant[], timed = false) {
   let members = initial
   let snap: RaceSnapshot = EMPTY_RACE
   const aiWriters = new Set<string>()
@@ -131,7 +152,7 @@ function memoryRoom(now: () => number, initial: readonly RaceEntrant[]) {
     async start(ai, cpsOf) {
       const entrants = Object.fromEntries(members.map((m, k) => [m.id, k]))
       const n = (snap.meta?.n ?? 0) + 1
-      publish({ meta: { n, ai, cps: cpsOf(n), at: now(), entrants }, progress: {}, ai: {} })
+      publish({ meta: { n, ai, cps: cpsOf(n), at: now(), entrants, ...(timed ? {} : { ready: now() }) }, progress: {}, ai: {}, build: {} })
     },
     async sendProgress(p) {
       publish({ ...snap, progress: { ...snap.progress, [selfId]: p } })
@@ -140,18 +161,26 @@ function memoryRoom(now: () => number, initial: readonly RaceEntrant[]) {
       aiWriters.add(selfId)
       publish({ ...snap, ai })
     },
+    async sendBuild(build) {
+      publish({ ...snap, build: { ...snap.build, [selfId]: build } })
+    },
+    ready: async () => undefined,
   })
   return { linkFor, aiWriters, leave, join }
 }
 
 /** 同一個房間裡的兩位玩家，各有自己的引擎與控制器，時間一起走 */
-function twoRiders() {
+function twoRiders(timed = false) {
   let t = 1_000_000
   const now = () => t
-  const room = memoryRoom(now, [
-    { id: 'me', name: '阿明' },
-    { id: 'other', name: '小美' },
-  ])
+  const room = memoryRoom(
+    now,
+    [
+      { id: 'me', name: '阿明' },
+      { id: 'other', name: '小美' },
+    ],
+    timed,
+  )
   const engines = new Map<string, GameEngine>()
   const rider = (id: string, name: string) => {
     const engine = new GameEngine({ seed: 3, name, storage: memoryStorage(), now })
@@ -183,6 +212,113 @@ function twoRiders() {
   }
   return { me, other, ride, room, now, rider }
 }
+
+describe('W1 整備站', () => {
+  const solo = () => setup((now) => localRaceLink('me', '阿明', now))
+
+  test('[W1-3] 單人開賽後先整備，沒有時間限制，按「出發」才進入 3 秒倒數', async () => {
+    const { controller, ride, player } = solo()
+    await controller.start(1)
+    const course = controller.course()!
+    expect(controller.view().phase).toBe('prep')
+    expect(controller.view().prepLeft).toBeNull()
+    expect(player().pos).toEqual(course.grid[0]!.pos)
+    await ride(60, PEDAL)
+    expect(controller.view().phase).toBe('prep')
+    expect(player().pos).toEqual(course.grid[0]!.pos)
+    expect(controller.aiRiders().map((a) => a.pos)).toEqual([course.grid[1]!.pos])
+
+    controller.go()
+    await ride(DT)
+    expect(controller.view().phase).toBe('countdown')
+    expect(controller.view().countdown).toBe(3)
+    await ride(3)
+    expect(controller.view().phase).toBe('racing')
+  }, 30_000)
+
+  test('[W1-3] 連線整備固定 20 秒，畫面顯示整備倒數，時間到所有人同時進入倒數', async () => {
+    const { me, other, ride } = twoRiders(true)
+    await me.controller.start(0)
+    await ride(DT)
+    for (const r of [me, other]) {
+      expect(r.controller.view().phase).toBe('prep')
+      expect(r.controller.view().prepLeft).toBe(20)
+    }
+    await ride(10)
+    for (const r of [me, other]) expect(r.controller.view().prepLeft).toBe(10)
+    await ride(10)
+    for (const r of [me, other]) {
+      expect(r.controller.view().phase).toBe('countdown')
+      expect(r.controller.view().prepLeft).toBeNull()
+    }
+  }, 30_000)
+
+  test('[W1-2] 整備時換零件即時改變組裝與腳踏車性能，超過預算的換法不接受，整備結束後不能換', async () => {
+    const { controller, ride, player } = solo()
+    await controller.start(0)
+    expect(controller.view().build).toEqual(DEFAULT_BUILD)
+    expect(player().bikeSpec).toEqual(bikeSpec(DEFAULT_BUILD))
+
+    controller.pickPart('frame', 'carbon')
+    controller.pickPart('wheel', 'nope')
+    expect(controller.view().build).toEqual(DEFAULT_BUILD)
+
+    const cheap = { ...DEFAULT_BUILD, frame: 'steel' }
+    controller.pickPart('frame', 'steel')
+    expect(controller.view().build).toEqual(cheap)
+    expect(player().bikeSpec).toEqual(bikeSpec(cheap))
+    expect(player().pos).toEqual(controller.course()!.grid[0]!.pos)
+
+    controller.go()
+    await ride(DT)
+    controller.pickPart('frame', 'alloy')
+    expect(controller.view().build).toEqual(cheap)
+    expect(player().bikeSpec).toEqual(bikeSpec(cheap))
+  })
+
+  test('[W1-4] 整備選的組裝存進存檔，下一局帶入', async () => {
+    const { engine, controller } = solo()
+    await controller.start(0)
+    controller.pickPart('frame', 'steel')
+    const cheap = { ...DEFAULT_BUILD, frame: 'steel' }
+    expect(engine.state.save.build).toEqual(cheap)
+
+    await controller.start(0)
+    expect(controller.view().n).toBe(2)
+    expect(controller.view().build).toEqual(cheap)
+    expect(engine.state.player.bikeSpec).toEqual(bikeSpec(cheap))
+  })
+})
+
+describe('W3 成績表組裝', () => {
+  test('[W3-1] 成績表每位選手顯示四個零件名稱，AI 也顯示，兩邊看到的一致', async () => {
+    const { me, other, ride } = twoRiders(true)
+    await me.controller.start(1)
+    await ride(DT)
+    const mine = { ...DEFAULT_BUILD, frame: 'steel' }
+    const theirs = { ...DEFAULT_BUILD, bar: 'flat' }
+    me.controller.pickPart('frame', 'steel')
+    other.controller.pickPart('bar', 'flat')
+    await ride(23.5)
+    expect(me.engine.state.player.bikeSpec).toEqual(bikeSpec(mine))
+    expect(other.engine.state.player.bikeSpec).toEqual(bikeSpec(theirs))
+
+    const course = me.controller.course()!
+    for (let k = 0; k < course.checkpoints.length; k++) {
+      me.at(checkpointPos(course, k))
+      await ride(DT)
+    }
+    await ride(31)
+
+    const builds = (r: typeof me) => Object.fromEntries(r.controller.view().results!.map((row) => [row.id, row.build]))
+    expect(builds(me)).toEqual({
+      me: buildLabel(mine),
+      other: buildLabel(theirs),
+      ai0: buildLabel(aiBuild(course, me.engine.city.seed, 0)),
+    })
+    expect(builds(other)).toEqual(builds(me))
+  }, 60_000)
+})
 
 describe('G1 開賽', () => {
   test('[G1-3] 開賽時在室內的玩家被移到起跑格騎上腳踏車，AI 在其餘起跑格', async () => {
@@ -438,11 +574,13 @@ describe('N1 比賽同步', () => {
   test('[N1-1] 伺服器修正開賽時間後，經過時間跟著改', async () => {
     const shift = { ms: 0 }
     const { controller, link, ride } = setup((now) => {
-      const base = localRaceLink('me', '阿明', now)
-      return { ...base, watch: (onChange) => base.watch((s) => onChange(s.meta ? { ...s, meta: { ...s.meta, at: s.meta.at + shift.ms } } : s)) }
+      const base = quickLink(now)
+      // 跟連線一樣整備固定 PREP_MS，開始計時的時間由伺服器的開賽時間決定
+      const timed = (meta: RaceMeta): RaceMeta => ({ ...meta, ready: undefined, at: meta.at + shift.ms })
+      return { ...base, watch: (onChange) => base.watch((s) => onChange(s.meta ? { ...s, meta: timed(s.meta) } : s)) }
     })
     await controller.start(0)
-    await ride(3.6)
+    await ride((PREP_MS + COUNTDOWN_MS) / 1000 + 0.6)
     const before = controller.view().elapsed
     shift.ms = 500
     await link.sendAi({})
@@ -533,7 +671,8 @@ describe('N1 比賽同步', () => {
     room.leave('other')
     await ride(DT, [late])
     const resumed = late.controller.aiRiders().map((a) => a.pos)
-    await ride(2, [late])
+    // 留 4 秒：加速慢的組裝剛起步時可能被 NPC 車擦撞，停頓一下才騎開
+    await ride(4, [late])
     expect(room.aiWriters).toEqual(new Set(['me', 'late']))
     late.controller.aiRiders().forEach((a, k) => expect(distance(a.pos, resumed[k]!)).toBeGreaterThan(5))
     expect(late.inRace()).toBe(false)
@@ -616,7 +755,7 @@ describe('G1 開新的一局被拒絕', () => {
     let snap: RaceSnapshot = EMPTY_RACE
     let reject = false
     const { controller, inRace, ride } = setup((now) => {
-      const base = localRaceLink('me', '阿明', now)
+      const base = quickLink(now)
       base.watch((s) => {
         snap = s
       })
@@ -645,7 +784,7 @@ describe('G1 開新的一局被拒絕', () => {
     let gate: (() => void) | null = null
     const writes: string[] = []
     const { controller, ride, at } = setup((now) => {
-      const base = localRaceLink('me', '阿明', now)
+      const base = quickLink(now)
       return {
         ...base,
         start: (ai, cpsOf) => {
@@ -684,7 +823,7 @@ describe('G1 開新的一局被拒絕', () => {
   test('[G1-4] 開新一局的檢查點數依伺服器實際開出的局數計算', async () => {
     let cpsOf: ((n: number) => number) | null = null
     const { engine, controller } = setup((now) => {
-      const base = localRaceLink('me', '阿明', now)
+      const base = quickLink(now)
       return {
         ...base,
         start: (ai, f) => {
@@ -703,7 +842,7 @@ describe('G1 開新的一局被拒絕', () => {
     let gate: (() => void) | null = null
     let starts = 0
     const { controller } = setup((now) => {
-      const base = localRaceLink('me', '阿明', now)
+      const base = quickLink(now)
       return {
         ...base,
         start: (ai, cpsOf) => {
@@ -759,7 +898,7 @@ test('[A1-5] 房主算的 AI 撞到其他參賽玩家時被推開', async () => 
 test('[N1-3] 停止監聽後，回到城市的房主不再於背景推進或上傳 AI', async () => {
   let writes = 0
   const { controller, ride, disconnect } = setup((now) => {
-    const base = localRaceLink('me', '阿明', now)
+    const base = quickLink(now)
     return {
       ...base,
       sendAi: (ai) => {

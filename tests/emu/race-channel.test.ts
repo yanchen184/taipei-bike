@@ -2,8 +2,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import type { RulesTestEnvironment } from '@firebase/rules-unit-testing'
 import type { RoomLink } from '../../src/game/online'
 import type { RaceSnapshot } from '../../src/modes/race/link'
-import type { AiNet } from '../../src/sim/race'
-import { clearAppDatabase, closeClients, newClient, rulesEnv } from './client'
+import { COUNTDOWN_MS, PREP_MS, type AiNet } from '../../src/sim/race'
+import { APP_DATABASE_URL, clearAppDatabase, closeClients, newClient, rulesEnv } from './client'
 
 let env: RulesTestEnvironment
 
@@ -44,6 +44,14 @@ async function twoPlayers() {
   return { host, guest }
 }
 
+/** 把這一局的開賽時間往前推 ms，模擬時間已經過去 */
+async function backdate(code: string, ms: number): Promise<void> {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const at = ctx.database(APP_DATABASE_URL).ref(`taipeiBike/rooms/${code}/race/meta/at`)
+    await at.set(((await at.get()).val() as number) - ms)
+  })
+}
+
 const aiNet = (n: number, x: number): AiNet => ({ n, x, z: 2, h: 0.5, s: 3, w: 1, cp: 0 })
 
 describe('N1 比賽同步', () => {
@@ -51,7 +59,7 @@ describe('N1 比賽同步', () => {
     const { host, guest } = await twoPlayers()
     const watcher = observe(guest)
     await until(() => watcher.seen.snap !== null)
-    expect(watcher.seen.snap).toEqual({ meta: null, progress: {}, ai: {} })
+    expect(watcher.seen.snap).toEqual({ meta: null, progress: {}, ai: {}, build: {} })
 
     await host.race.start(2, () => 6, { [host.uid]: 0, [guest.uid]: 1 })
     await until(() => watcher.seen.snap?.meta?.n === 1)
@@ -119,12 +127,31 @@ describe('N1 比賽同步', () => {
     await until(() => watcher.seen.snap?.ai['0']?.x === 10)
     expect(watcher.seen.snap!.ai['0']!.fin).toBe(fin)
 
-    // 規則要求倒數 3 秒結束後才能寫進度
-    await new Promise((r) => setTimeout(r, 3100))
+    // 規則要求整備 20 秒加倒數 3 秒結束後才能寫進度：把開賽時間往前推，不用真的等
+    await expect(guest.race.sendProgress({ n: 1, cp: 1 })).rejects.toThrow()
+    await backdate(host.code, PREP_MS + COUNTDOWN_MS + 100)
     await guest.race.sendProgress({ n: 1, cp: 1 })
     await until(() => hostWatcher.seen.snap?.progress[guest.uid]?.cp === 1)
     expect(hostWatcher.seen.snap!.progress[guest.uid]).toEqual({ n: 1, cp: 1 })
     watcher.stop()
     hostWatcher.stop()
+  })
+
+  test('[N3-1] 整備時送出的組裝，其他人都收得到；整備結束後就不能再改', async () => {
+    const { host, guest } = await twoPlayers()
+    await host.race.start(0, () => 6, { [host.uid]: 0, [guest.uid]: 1 })
+    const watcher = observe(host)
+    await until(() => watcher.seen.snap?.meta?.n === 1)
+
+    const build = { n: 1, frame: 'carbon', wheel: 'slick', drive: 'single', bar: 'flat' } as const
+    await guest.race.sendBuild(build)
+    await until(() => watcher.seen.snap?.build[guest.uid] !== undefined)
+    expect(watcher.seen.snap!.build[guest.uid]).toEqual(build)
+
+    await backdate(host.code, PREP_MS + 100)
+    await expect(guest.race.sendBuild({ ...build, frame: 'steel' })).rejects.toThrow()
+    expect(watcher.seen.snap!.build[guest.uid]).toEqual(build)
+    expect(watcher.seen.errors).toEqual([])
+    watcher.stop()
   })
 })

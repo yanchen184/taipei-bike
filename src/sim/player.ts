@@ -1,7 +1,7 @@
 import { CAR_LANE_OFFSET, ROAD_WIDTH, SIDEWALK, nearestRoadPose } from './city'
 import { isFree, resolveCircle, type Circle } from './collide'
 import type { CityMap, Pose, Vec2 } from './types'
-import { BIKE_SPEC, CAR_SPEC, moveVehicle, substeps, type VehicleState } from './vehicle'
+import { BIKE_SPEC, CAR_SPEC, moveVehicle, substeps, type VehicleSpec, type VehicleState } from './vehicle'
 
 export const WALK_SPEED = 4
 export const RUN_SPEED = 7
@@ -28,6 +28,8 @@ export interface PlayerState {
   heading: number
   car: CarState
   bike: VehicleState | null
+  /** 腳踏車的性能，由整備站的組裝決定 */
+  bikeSpec: VehicleSpec
   location: Location
   odometer: number
 }
@@ -54,6 +56,7 @@ export function createPlayer(city: CityMap): PlayerState {
     heading: lane.heading,
     car: { pos: towardCurb(SPAWN_CAR_SHIFT), heading: lane.heading, speed: 0 },
     bike: null,
+    bikeSpec: BIKE_SPEC,
     location: { kind: 'outdoor' },
     odometer: 0,
   }
@@ -85,14 +88,13 @@ function stepDrive(state: PlayerState, input: PlayerInput, dt: number, city: Cit
 
 function stepBike(state: PlayerState, input: PlayerInput, dt: number, city: CityMap, obstacles: readonly Circle[]): PlayerState {
   if (!state.bike) return state
-  const bike = moveVehicle(state.bike, BIKE_SPEC, { ...input, handbrake: false }, dt, city.colliders, obstacles)
+  const bike = moveVehicle(state.bike, state.bikeSpec, { ...input, handbrake: false }, dt, city.colliders, obstacles)
   return { ...state, pos: bike.pos, heading: bike.heading, bike }
 }
 
-const MODE_MAX_SPEED: Record<PlayerState['mode'], number> = {
-  walk: RUN_SPEED,
-  drive: CAR_SPEC.maxSpeed,
-  bike: BIKE_SPEC.maxSpeed,
+function modeMaxSpeed(state: PlayerState): number {
+  if (state.mode === 'drive') return CAR_SPEC.maxSpeed
+  return state.mode === 'bike' ? state.bikeSpec.maxSpeed : RUN_SPEED
 }
 
 /** 推進 dt 秒，依最大位移切成子步；室內時 colliders 由呼叫端換成室內的 */
@@ -103,7 +105,7 @@ export function stepPlayer(
   city: CityMap,
   obstacles: readonly Circle[] = [],
 ): PlayerState {
-  const count = substeps(MODE_MAX_SPEED[state.mode], dt)
+  const count = substeps(modeMaxSpeed(state), dt)
   const sub = dt / count
   let s = state
   for (let k = 0; k < count; k++) {
@@ -143,10 +145,10 @@ export function exitCar(state: PlayerState, city: CityMap): PlayerState {
   return { ...stepOff(state, state.car, CAR_RADIUS, city), car: { ...state.car, speed: 0 } }
 }
 
-/** 騎上腳踏車：放在指定位置、速度 0、地點設為戶外 */
-export function mountBike(state: PlayerState, pose: Pose): PlayerState {
+/** 騎上腳踏車：放在指定位置、速度 0、地點設為戶外；不給 spec 時沿用原本的性能 */
+export function mountBike(state: PlayerState, pose: Pose, spec: VehicleSpec = state.bikeSpec): PlayerState {
   const bike = { pos: pose.pos, heading: pose.heading, speed: 0 }
-  return { ...state, mode: 'bike', pos: pose.pos, heading: pose.heading, bike, location: { kind: 'outdoor' } }
+  return { ...state, mode: 'bike', pos: pose.pos, heading: pose.heading, bike, bikeSpec: spec, location: { kind: 'outdoor' } }
 }
 
 export function dismountBike(state: PlayerState, city: CityMap): PlayerState {

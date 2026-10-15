@@ -43,8 +43,10 @@ export function rulesEnv(): Promise<RulesTestEnvironment> {
   })
 }
 
+/** App 使用的資料庫 */
+export const APP_DATABASE_URL = `http://${DATABASE_EMULATOR.host}:${DATABASE_EMULATOR.port}/?ns=${EMULATOR_PROJECT_ID}-default-rtdb`
+
 /** 清掉 App 使用的資料庫裡本遊戲的資料 */
 export function clearAppDatabase(env: RulesTestEnvironment): Promise<void> {
-  const url = `http://${DATABASE_EMULATOR.host}:${DATABASE_EMULATOR.port}/?ns=${EMULATOR_PROJECT_ID}-default-rtdb`
-  return env.withSecurityRulesDisabled((ctx) => ctx.database(url).ref('taipeiBike').remove())
+  return env.withSecurityRulesDisabled((ctx) => ctx.database(APP_DATABASE_URL).ref('taipeiBike').remove())
 }

@@ -15,6 +15,9 @@ const newRound = (n: number, entrants: Record<string, number> = { alice: 0, bob:
   meta: { n, ai: 2, cps: 6, at: NOW, entrants },
 })
 
+/** 合法組裝（鋁合金、通勤胎、單速、直把） */
+const BUILD = { frame: 'alloy', wheel: 'commuter', drive: 'single', bar: 'flat' }
+
 const db = (uid: string) => env.authenticatedContext(uid).database()
 const progress = (uid: string) => db(uid).ref(`${RACE}/progress/${uid}`)
 
@@ -50,15 +53,18 @@ describe('N2 比賽安全規則', () => {
   test('[N2-1] 只有房主能開新的一局或刪除比賽，開新局時清掉上一局的進度與 AI，不能寫 meta 以外的欄位', async () => {
     await seed(`${RACE}/progress/bob`, { n: 1, cp: 2 })
     await seed(`${RACE}/ai/0`, aiNet())
+    await seed(`${RACE}/build/bob`, { n: 1, ...BUILD })
     await assertFails(db('bob').ref(RACE).set(newRound(2)))
     await assertFails(db('alice').ref(RACE).set({ ...newRound(2), progress: { alice: { n: 2, cp: 1 } } }))
     await assertFails(db('alice').ref(RACE).set({ ...newRound(2), ai: { '0': aiNet(2) } }))
+    await assertFails(db('alice').ref(RACE).set({ ...newRound(2), build: { alice: { n: 2, ...BUILD } } }))
     await assertFails(db('alice').ref(RACE).set(newRound(3)))
     await assertFails(db('alice').ref(RACE).set({ unexpected: 1 }))
     await assertFails(db('alice').ref(RACE).set({ ...newRound(2), unexpected: 1 }))
     await assertSucceeds(db('alice').ref(RACE).set(newRound(2)))
     expect(await read(`${RACE}/progress`)).toBeNull()
     expect(await read(`${RACE}/ai`)).toBeNull()
+    expect(await read(`${RACE}/build`)).toBeNull()
     await assertFails(db('bob').ref(RACE).remove())
     await assertSucceeds(db('alice').ref(RACE).remove())
   })
@@ -167,6 +173,61 @@ describe('N2 比賽安全規則', () => {
     await seed(`${ROOM}/players/bob`, null)
     await assertFails(progress('bob').set({ n: 1, cp: 1 }))
     await assertSucceeds(progress('alice').set({ n: 1, cp: 1 }))
+  })
+
+  test('[N3-2] 整備 20 秒加倒數 3 秒結束前不能寫進度', async () => {
+    await seed(`${RACE}/meta`, { ...meta, at: Date.now() - 10_000 })
+    await assertFails(progress('bob').set({ n: 1, cp: 1 }))
+    await seed(`${RACE}/meta`, { ...meta, at: Date.now() - 21_000 })
+    await assertFails(progress('bob').set({ n: 1, cp: 1 }))
+    await seed(`${RACE}/meta`, { ...meta, at: Date.now() - 24_000 })
+    await assertSucceeds(progress('bob').set({ n: 1, cp: 1 }))
+  })
+})
+
+describe('N3 組裝安全規則', () => {
+  const build = (uid: string) => db(uid).ref(`${RACE}/build/${uid}`)
+  const inPrep = () => seed(`${RACE}/meta`, { ...meta, at: Date.now() })
+
+  test('[N3-1] 參賽者在整備時間內可以寫自己的組裝，可以改，不能刪', async () => {
+    await inPrep()
+    await assertSucceeds(build('bob').set({ n: 1, ...BUILD }))
+    await assertSucceeds(build('bob').set({ n: 1, ...BUILD, frame: 'carbon' }))
+    expect(await read(`${RACE}/build/bob/frame`)).toBe('carbon')
+    await assertFails(build('bob').remove())
+  })
+
+  test('[N3-1] 只能寫自己的組裝，而且要是本局參賽者', async () => {
+    await inPrep()
+    await assertFails(db('alice').ref(`${RACE}/build/bob`).set({ n: 1, ...BUILD }))
+    await assertFails(build('carol').set({ n: 1, ...BUILD }))
+    await assertFails(build('mallory').set({ n: 1, ...BUILD }))
+  })
+
+  test('[N3-1] 整備時間結束後不能改組裝', async () => {
+    await seed(`${RACE}/meta`, { ...meta, at: Date.now() - 21_000 })
+    await assertFails(build('bob').set({ n: 1, ...BUILD }))
+  })
+
+  test('[N3-1] 局數要是目前這局，零件要在零件表內，不能有多的欄位', async () => {
+    await inPrep()
+    await assertFails(build('bob').set({ n: 2, ...BUILD }))
+    await assertFails(build('bob').set({ n: 1, ...BUILD, frame: 'titanium' }))
+    await assertFails(build('bob').set({ n: 1, ...BUILD, wheel: 'rocket' }))
+    await assertFails(build('bob').set({ n: 1, ...BUILD, drive: 'turbo' }))
+    await assertFails(build('bob').set({ n: 1, ...BUILD, bar: 'aero' }))
+    await assertFails(build('bob').set({ n: 1, frame: 'alloy', wheel: 'commuter', drive: 'single' }))
+    await assertFails(build('bob').set({ n: 1, ...BUILD, extra: 1 }))
+  })
+
+  test('[N3-1] 超過預算的組裝寫不進去', async () => {
+    await inPrep()
+    await assertFails(build('bob').set({ n: 1, frame: 'carbon', wheel: 'slick', drive: 'tall', bar: 'flat' }))
+    await assertFails(build('bob').set({ n: 1, frame: 'carbon', wheel: 'commuter', drive: 'short', bar: 'stem' }))
+    await assertFails(build('bob').set({ n: 1, frame: 'alloy', wheel: 'grip', drive: 'short', bar: 'stem' }))
+    await assertSucceeds(build('bob').set({ n: 1, frame: 'carbon', wheel: 'slick', drive: 'single', bar: 'flat' }))
+    await assertSucceeds(build('bob').set({ n: 1, frame: 'alloy', wheel: 'commuter', drive: 'short', bar: 'stem' }))
+    await assertSucceeds(build('bob').set({ n: 1, frame: 'steel', wheel: 'grip', drive: 'tall', bar: 'drop' }))
   })
 
   test('騎腳踏車時狀態的 mode 是 bike', async () => {

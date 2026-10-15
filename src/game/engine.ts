@@ -24,7 +24,9 @@ import {
   type Route,
   type TrafficState,
 } from '../sim/traffic'
+import type { Build } from '../sim/parts'
 import type { CityMap, Pose } from '../sim/types'
+import type { VehicleSpec } from '../sim/vehicle'
 
 export type CameraMode = 'chase' | 'top'
 export type Action = 'interact' | 'callCar' | 'reset' | 'camera' | 'horn' | 'menu' | 'close'
@@ -187,10 +189,17 @@ export class GameEngine {
     return this.npcObstacles(this.current.traffic)
   }
 
-  /** 在指定位置騎上腳踏車（速度 0、移到戶外），汽車留在原地 */
-  mountBike(pose: Pose): void {
-    this.setPlayer(mountBike(this.current.player, pose), pose.heading)
+  /** 在指定位置騎上腳踏車（速度 0、移到戶外），汽車留在原地；給 spec 時換成這個性能 */
+  mountBike(pose: Pose, spec?: VehicleSpec): void {
+    this.setPlayer(mountBike(this.current.player, pose, spec), pose.heading)
     this.emit()
+  }
+
+  /** 記下整備完的組裝，立即存檔 */
+  setBuild(build: Build): void {
+    const save = { ...this.current.save, build }
+    this.current = { ...this.current, save }
+    this.persist(save)
   }
 
   /** 下腳踏車，站在車旁 */

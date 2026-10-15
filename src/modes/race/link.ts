@@ -1,11 +1,13 @@
 import type { OnlineSession } from '../../game/online'
-import type { AiNet, Progress, RaceMeta } from '../../sim/race'
+import type { AiNet, BuildNet, Progress, RaceMeta } from '../../sim/race'
 
 /** race 節點的內容；meta 為 null 表示還沒有比賽 */
 export interface RaceSnapshot {
   meta: RaceMeta | null
   progress: Readonly<Record<string, Progress>>
   ai: Readonly<Record<string, AiNet>>
+  /** 玩家 uid → 本局的組裝 */
+  build: Readonly<Record<string, BuildNet>>
 }
 
 export interface RaceEntrant {
@@ -29,9 +31,13 @@ export interface RaceLink {
   start(ai: number, cpsOf: (n: number) => number): Promise<void>
   sendProgress(p: Progress): Promise<void>
   sendAi(ai: Record<string, AiNet>): Promise<void>
+  /** 整備時寫入自己的組裝 */
+  sendBuild(build: BuildNet): Promise<void>
+  /** 單人按「出發」結束整備；連線的整備時間固定，不做事 */
+  ready(): Promise<void>
 }
 
-export const EMPTY_RACE: RaceSnapshot = { meta: null, progress: {}, ai: {} }
+export const EMPTY_RACE: RaceSnapshot = { meta: null, progress: {}, ai: {}, build: {} }
 
 /** 連線用：房主是最早加入的玩家，起跑格依加入先後；讀寫錯誤顯示在房間面板 */
 export function onlineRaceLink(session: OnlineSession): RaceLink {
@@ -47,10 +53,12 @@ export function onlineRaceLink(session: OnlineSession): RaceLink {
     start: (ai, cpsOf) => link.race.start(ai, cpsOf, Object.fromEntries(roster().map((e, k) => [e.id, k]))),
     sendProgress: (p) => link.race.sendProgress(p),
     sendAi: (ai) => link.race.sendAi(ai),
+    sendBuild: (build) => link.race.sendBuild(build),
+    ready: async () => undefined,
   }
 }
 
-/** 單人用：資料放記憶體，自己就是房主 */
+/** 單人用：資料放記憶體，自己就是房主；整備沒有時間限制，按「出發」才開始倒數 */
 export function localRaceLink(selfId: string, name: string, now: () => number = Date.now): RaceLink {
   let snap = EMPTY_RACE
   const listeners = new Set<(snap: RaceSnapshot) => void>()
@@ -71,14 +79,20 @@ export function localRaceLink(selfId: string, name: string, now: () => number = 
     },
     async start(ai, cpsOf) {
       const n = (snap.meta?.n ?? 0) + 1
-      const meta: RaceMeta = { n, ai, cps: cpsOf(n), at: now(), entrants: { [selfId]: 0 } }
-      publish({ meta, progress: {}, ai: {} })
+      const meta: RaceMeta = { n, ai, cps: cpsOf(n), at: now(), entrants: { [selfId]: 0 }, ready: null }
+      publish({ meta, progress: {}, ai: {}, build: {} })
     },
     async sendProgress(p) {
       publish({ ...snap, progress: { ...snap.progress, [selfId]: p } })
     },
     async sendAi(ai) {
       publish({ ...snap, ai })
+    },
+    async sendBuild(build) {
+      publish({ ...snap, build: { ...snap.build, [selfId]: build } })
+    },
+    async ready() {
+      if (snap.meta?.ready === null) publish({ ...snap, meta: { ...snap.meta, ready: now() } })
     },
   }
 }

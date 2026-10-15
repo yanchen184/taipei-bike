@@ -2,7 +2,8 @@ import { describe, expect, test } from 'vitest'
 import { generateCity, roadCenter } from './city'
 import { circleHitsRect, type Circle } from './collide'
 import { createPlayer, mountBike, stepPlayer, type PlayerInput, type PlayerState } from './player'
-import { BIKE_SPEC, BOUNCE, substeps } from './vehicle'
+import { bikeSpec, buildStats, type Build } from './parts'
+import { BIKE_SPEC, BOUNCE, CAR_SPEC, moveVehicle, substeps, type VehicleSpec } from './vehicle'
 import type { CityMap, Pose } from './types'
 
 const city = generateCity(3)
@@ -29,7 +30,7 @@ function ride(state: PlayerState, input: Partial<PlayerInput>, seconds: number, 
 }
 
 describe('B1 騎車', () => {
-  test('[B1-1] 按住 W 加速，速度不超過 12 m/s', () => {
+  test('[B1-1] 按住 W 加速，速度不超過組裝的極速', () => {
     const { state, frames } = ride(rider({ pos: { x: 160, z: 160 }, heading: 0 }), { forward: 1 }, 6, openCity)
     expect(BIKE_SPEC.maxSpeed).toBe(12)
     expect(frames[0]!.bike!.speed).toBeGreaterThan(0)
@@ -104,5 +105,39 @@ describe('B1 騎車', () => {
       const d = Math.hypot(f.bike!.pos.x - other.pos.x, f.bike!.pos.z - other.pos.z)
       expect(d).toBeGreaterThanOrEqual(BIKE_SPEC.radius + other.radius - 1e-9)
     }
+  })
+})
+
+const FAST: Build = { frame: 'carbon', wheel: 'slick', drive: 'single', bar: 'flat' }
+const GRIPPY: Build = { frame: 'steel', wheel: 'grip', drive: 'single', bar: 'stem' }
+
+describe('W2 組裝性能', () => {
+  test('[W2-2] 騎車時極速、加速、煞車依組裝', () => {
+    for (const build of [FAST, GRIPPY]) {
+      const stats = buildStats(build)
+      const start = mountBike(createPlayer(city), { pos: { x: 160, z: 160 }, heading: 0 }, bikeSpec(build))
+      const { state, frames } = ride(start, { forward: 1 }, 8, openCity)
+      expect(Math.max(...frames.map((f) => f.bike!.speed))).toBe(stats.top)
+      expect(state.bike!.speed).toBe(stats.top)
+      expect(frames[0]!.bike!.speed).toBeCloseTo(stats.accel * DT, 9)
+      const braking = ride({ ...state, bike: { ...state.bike!, speed: 10 } }, { forward: -1 }, DT, openCity).state
+      expect(10 - braking.bike!.speed).toBeCloseTo(stats.brake * DT, 9)
+    }
+  })
+
+  test('[W2-3] 速度高於過彎值時轉向率按「過彎 ÷ 速度」縮小，以下時不變', () => {
+    const spec: VehicleSpec = bikeSpec(GRIPPY)
+    const corner = spec.corner!
+    const turn = (speed: number, s: VehicleSpec = spec) => {
+      const v = moveVehicle({ pos: { x: 160, z: 160 }, heading: 0, speed }, s, { forward: 0, right: 1, handbrake: false }, 0.01, [], [])
+      return { rate: -v.heading / 0.01, speed: v.speed }
+    }
+    const slow = turn(corner - 1)
+    expect(slow.rate).toBeCloseTo(spec.turnRate, 9)
+    const fast = turn(corner + 2)
+    expect(fast.rate).toBeCloseTo((spec.turnRate * corner) / fast.speed, 9)
+    expect(fast.rate).toBeLessThan(spec.turnRate)
+    const car = turn(20, CAR_SPEC)
+    expect(car.rate).toBeCloseTo(CAR_SPEC.turnRate, 9)
   })
 })

@@ -1,6 +1,7 @@
 import type { TurnKind } from '../../sim/course'
 import type { RaceController, ResultRow } from './controller'
 import { RaceMinimap } from './RaceMinimap'
+import { RaceWorkshop } from './RaceWorkshop'
 import { useRaceView } from './useRaceView'
 
 /** 毫秒 → m:ss.d */
@@ -18,14 +19,22 @@ const BUTTON = 'pointer-events-auto rounded-lg px-4 py-2 font-bold shadow'
 
 function Results({ rows, host, controller }: { rows: readonly ResultRow[]; host: boolean; controller: RaceController }) {
   return (
-    <div data-testid="race-results" className="absolute left-1/2 top-1/2 w-80 -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white/95 p-5 text-stone-800 shadow-xl">
+    <div
+      data-testid="race-results"
+      className="absolute left-1/2 top-1/2 w-[26rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white/95 p-5 text-stone-800 shadow-xl"
+    >
       <h2 className="mb-3 text-center text-xl font-black">比賽結果</h2>
       <table className="w-full text-left">
         <tbody>
           {rows.map((r) => (
             <tr key={r.id} data-testid="race-result-row" className="border-t border-stone-200">
               <td className="py-1 pr-2 font-bold tabular-nums">{r.rank}</td>
-              <td className="py-1">{r.name}</td>
+              <td className="py-1">
+                <span className="block">{r.name}</span>
+                <span data-testid="race-result-build" className="block text-xs text-stone-500">
+                  {r.build ?? '—'}
+                </span>
+              </td>
               <td className="py-1 text-right tabular-nums">{r.time === null ? '未完成' : formatRaceTime(r.time)}</td>
             </tr>
           ))}
@@ -47,6 +56,7 @@ function Results({ rows, host, controller }: { rows: readonly ResultRow[]; host:
 
 export function RaceHud({ controller }: { controller: RaceController }) {
   const v = useRaceView(controller)
+  if (v.phase === 'prep') return <RaceWorkshop controller={controller} />
   return (
     <div data-testid="race-hud">
       <div className="pointer-events-none absolute left-1/2 top-4 flex -translate-x-1/2 flex-col items-center gap-2">

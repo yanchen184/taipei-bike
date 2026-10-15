@@ -20,6 +20,7 @@ function fakeLink(reply: (state: NetState) => Promise<void> = async () => undefi
       start: async () => undefined,
       sendProgress: async () => undefined,
       sendAi: async () => undefined,
+      sendBuild: async () => undefined,
     },
     send: (state) => {
       sent.push(state)

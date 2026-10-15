@@ -19,6 +19,8 @@ export interface VehicleSpec {
   turnRate: number
   /** 低於這個速度時轉向率依速度線性縮小，靜止時為 0 */
   fullTurnSpeed: number
+  /** 過彎：高於這個速度時轉向率乘上「過彎 ÷ 速度」；沒有時不限制（汽車） */
+  corner?: number
 }
 
 /** forward：W = 1、S = -1；right：D = 1、A = -1 */
@@ -45,17 +47,19 @@ export const CAR_SPEC: VehicleSpec = {
   fullTurnSpeed: 6,
 }
 
+/** 沒有任何加成時的腳踏車（§12-5 基準）；比賽時依組裝換掉極速、加速、過彎、煞車 */
 export const BIKE_SPEC: VehicleSpec = {
   radius: 0.6,
   maxSpeed: 12,
   maxReverse: 3,
-  accel: 4,
+  accel: 3,
   brake: 10,
   reverseAccel: 2,
   drag: 1,
   handbrake: 10,
   turnRate: 2.2,
   fullTurnSpeed: 3,
+  corner: 6,
 }
 
 function nextSpeed(speed: number, spec: VehicleSpec, input: DriveInput, dt: number): number {
@@ -81,7 +85,8 @@ export function moveVehicle(
   obstacles: readonly Circle[],
 ): VehicleState {
   const speed = nextSpeed(v.speed, spec, input, dt)
-  const grip = Math.min(1, Math.abs(speed) / spec.fullTurnSpeed) * Math.sign(speed)
+  const fast = spec.corner !== undefined && Math.abs(speed) > spec.corner ? spec.corner / Math.abs(speed) : 1
+  const grip = Math.min(1, Math.abs(speed) / spec.fullTurnSpeed) * Math.sign(speed) * fast
   const heading = v.heading - input.right * spec.turnRate * grip * dt
   const target = { x: v.pos.x + Math.sin(heading) * speed * dt, z: v.pos.z + Math.cos(heading) * speed * dt }
   const { pos, hit } = resolveCircle(target, spec.radius, colliders, obstacles)

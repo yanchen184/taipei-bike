@@ -2,6 +2,7 @@ import { isFree, segmentHitsRect, type Circle } from './collide'
 import { ROAD_WIDTH, SIDEWALK } from './city'
 import { CHECKPOINT_RADIUS, advanceCheckpoint, nodePose, type Course } from './course'
 import { MAX_AI } from './race'
+import { bikeSpec, type Build } from './parts'
 import type { Rect, Vec2 } from './types'
 import { BIKE_SPEC, stepVehicle, type DriveInput, type VehicleSpec, type VehicleState } from './vehicle'
 
@@ -13,9 +14,6 @@ const LOOK_AHEAD = 12
 const LANE_MARGIN = 0.3
 /** 目標點在自己前方多遠（沿路線） */
 const CARROT = 6
-/** 離轉彎點多遠時切到下一段 */
-const TURN_LEAD = 2
-const SLOW_ZONE = 20
 /** 離檢查點路口多遠以內走路中線（進路口前、出路口後） */
 const CHECKPOINT_APPROACH = 20
 const CHECKPOINT_EXIT = 10
@@ -23,7 +21,8 @@ const CHECKPOINT_EXIT_LANES = [0, 3]
 /** 出彎後多遠以內改瞄靠內的路線：出彎會甩寬約 1.5 m，瞄路邊會甩上人行道 */
 const TURN_EXIT = 10
 const TURN_EXIT_LANES = [3, 0]
-const TURN_SPEED = 6
+/** 車頭與目標方向差超過這個角度（轉彎、換車道）就不加速，免得速度太快甩寬 */
+const EXIT_ALIGN = 0.35
 const STEER_GAIN = 2.5
 const STUCK_DISTANCE = 3
 const STUCK_SECONDS = 3
@@ -47,17 +46,58 @@ export interface AiRider {
   fin: boolean
 }
 
-/** 第 k 台（0 起算）的最高速度 */
-export function aiMaxSpeed(k: number): number {
-  return 8.5 + 0.7 * k
+/** 騎法（§10-2）：直線踩到極速的幾成、過彎半徑、彎前用幾成煞車力減速、提早幾公尺開始減速 */
+export interface AiStyle {
+  pedal: number
+  radius: number
+  brake: number
+  margin: number
 }
 
-const AI_SPECS: readonly VehicleSpec[] = Array.from({ length: MAX_AI }, (_, k) => ({ ...BIKE_SPEC, maxSpeed: aiMaxSpeed(k) }))
+/** AI 1（k = 0）最弱，AI 5 最強 */
+export const AI_STYLES: readonly AiStyle[] = [
+  { pedal: 0.8, radius: 3.5, brake: 0.4, margin: 10 },
+  { pedal: 0.85, radius: 4, brake: 0.5, margin: 8 },
+  { pedal: 0.9, radius: 4.5, brake: 0.6, margin: 6 },
+  { pedal: 0.95, radius: 5, brake: 0.7, margin: 4 },
+  { pedal: 1, radius: 5.5, brake: 0.8, margin: 2 },
+]
 
-function aiSpec(k: number): VehicleSpec {
-  const spec = AI_SPECS[k]
-  if (!spec) throw new RangeError(`AI 編號必須是 0 到 ${MAX_AI - 1}：${k}`)
-  return spec
+/** 一台 AI 的編號（決定停車位與騎法）與組裝出來的腳踏車 */
+export interface AiDriver {
+  k: number
+  spec: VehicleSpec
+  style: AiStyle
+}
+
+export function aiStyle(k: number): AiStyle {
+  const style = AI_STYLES[k]
+  if (!style) throw new RangeError(`AI 編號必須是 0 到 ${MAX_AI - 1}：${k}`)
+  return style
+}
+
+export function aiDriver(k: number, build: Build): AiDriver {
+  return { k, spec: bikeSpec(build), style: aiStyle(k) }
+}
+
+/** 直線上踩到的速度 */
+export function cruiseSpeed(spec: VehicleSpec, style: AiStyle): number {
+  return spec.maxSpeed * style.pedal
+}
+
+/** 用全轉向以 style.radius 半徑過彎的速度：過彎值以下半徑 = 速度 ÷ 轉向率，以上半徑 = 速度² ÷（轉向率 × 過彎）；不超過直線速度 */
+export function turnSpeed(spec: VehicleSpec, style: AiStyle): number {
+  const corner = spec.corner ?? spec.maxSpeed
+  const slow = spec.turnRate * style.radius
+  const v = slow <= corner ? slow : Math.sqrt(spec.turnRate * corner * style.radius)
+  return Math.min(v, cruiseSpeed(spec, style))
+}
+
+/** 離轉彎點 distance 公尺時最多騎多快，才能用自己的減速度在轉彎點降到過彎速度 */
+export function approachSpeed(spec: VehicleSpec, style: AiStyle, distance: number): number {
+  const vt = turnSpeed(spec, style)
+  const room = Math.max(0, distance - style.margin)
+  return Math.sqrt(vt * vt + 2 * spec.brake * style.brake * room)
 }
 
 export function createAi(course: Course, slot: number): AiRider {
@@ -183,8 +223,8 @@ export function parkSlot(course: Course, k: number, colliders: readonly Rect[]):
 }
 
 /** 完賽後慢慢騎到自己的停車位停好；不與其他選手碰撞，只避開建築 */
-function park(ai: AiRider, k: number, course: Course, dt: number, colliders: readonly Rect[]): AiRider {
-  const slot = parkSlot(course, k, colliders)
+function park(ai: AiRider, driver: AiDriver, course: Course, dt: number, colliders: readonly Rect[]): AiRider {
+  const slot = parkSlot(course, driver.k, colliders)
   const { pos, heading, speed } = ai.bike
   const distance = Math.hypot(slot.x - pos.x, slot.z - pos.z)
   if (distance < PARK_ARRIVE) return speed === 0 ? ai : { ...ai, bike: { ...ai.bike, speed: 0 } }
@@ -194,25 +234,26 @@ function park(ai: AiRider, k: number, course: Course, dt: number, colliders: rea
     right: Math.max(-1, Math.min(1, -error * STEER_GAIN)),
     handbrake: false,
   }
-  return { ...ai, bike: stepVehicle(ai.bike, aiSpec(k), input, dt, colliders, []) }
+  return { ...ai, bike: stepVehicle(ai.bike, driver.spec, input, dt, colliders, []) }
 }
 
-/** 推進 dt 秒（固定用 AI_STEP）；obstacles 是其他選手、其他 AI 與 NPC 車 */
+/** 推進 dt 秒（固定用 AI_STEP），用 driver 的組裝與騎法；obstacles 是其他選手、其他 AI 與 NPC 車 */
 export function stepAi(
   ai: AiRider,
-  k: number,
+  driver: AiDriver,
   course: Course,
   dt: number,
   colliders: readonly Rect[],
   obstacles: readonly Circle[],
 ): AiRider {
-  if (ai.fin) return park(ai, k, course, dt, colliders)
-  const spec = aiSpec(k)
+  if (ai.fin) return park(ai, driver, course, dt, colliders)
+  const { spec, style } = driver
   let wp = ai.wp
   let l = leg(course, wp)
   let along = alongOf(l, ai.bike.pos)
   let lane = laneFor(course, wp, l, along, colliders, obstacles)
-  if (wp + 1 < course.nodes.length && along >= turnAlong(course, wp, endLane(course, wp, lane)) - TURN_LEAD) {
+  // 離轉彎點一個過彎半徑時切到下一段，弧線才會剛好接上下一段；太晚切會甩出路外（城市邊緣直接撞牆）
+  if (wp + 1 < course.nodes.length && along >= turnAlong(course, wp, endLane(course, wp, lane)) - style.radius) {
     wp += 1
     l = leg(course, wp)
     along = alongOf(l, ai.bike.pos)
@@ -223,9 +264,10 @@ export function stepAi(
   const target = onLane(l, Math.min(Math.max(along, 0) + CARROT, end), lane)
   const { pos, heading, speed } = ai.bike
   const error = wrapAngle(Math.atan2(target.x - pos.x, target.z - pos.z) - heading)
-  const nearTurn = isTurn(course, wp) && end - along < SLOW_ZONE
+  const ahead = isTurn(course, wp) ? approachSpeed(spec, style, end - along) : Infinity
+  const turning = Math.abs(error) > EXIT_ALIGN ? turnSpeed(spec, style) : Infinity
   const input: DriveInput = {
-    forward: throttle(speed, nearTurn ? TURN_SPEED : spec.maxSpeed),
+    forward: throttle(speed, Math.min(cruiseSpeed(spec, style), ahead, turning)),
     right: Math.max(-1, Math.min(1, -error * STEER_GAIN)),
     handbrake: false,
   }
