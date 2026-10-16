@@ -1,10 +1,11 @@
 import { isFree, segmentHitsRect, type Circle } from './collide'
 import { ROAD_WIDTH, SIDEWALK } from './city'
-import { CHECKPOINT_RADIUS, advanceCheckpoint, nodePose, type Course } from './course'
+import { CHECKPOINT_RADIUS, advanceCheckpoint, checkpointPos, nodePose, type Course } from './course'
 import { MAX_AI } from './race'
 import { bikeSpec, type Build } from './parts'
 import type { Rect, Vec2 } from './types'
 import { BALANCE_SPEED, FEET_DOWN_SPEED, WOBBLE_STEER, isDown, restingBike, stepBike, type BikeState } from './bike'
+import { type Stamina, drainRate, regenRate } from './stamina'
 import { BIKE_SPEC, stepVehicle, type DriveInput, type VehicleSpec } from './vehicle'
 
 export const AI_STEP = 1 / 30
@@ -48,6 +49,8 @@ const PARK_START = CHECKPOINT_RADIUS + 4
 const PARK_GAP = 2.4
 const PARK_SPEED = 5
 const PARK_ARRIVE = 0.4
+/** 最後衝刺時體力低於這個值就退回直線速度，不在終點前耗盡 */
+const SPRINT_RESERVE = 0.1
 
 export interface AiRider {
   bike: BikeState
@@ -62,21 +65,28 @@ export interface AiRider {
   fin: boolean
 }
 
-/** 騎法（§10-2）：直線踩到極速的幾成、過彎半徑、彎前用幾成煞車力減速、提早幾公尺開始減速 */
+/**
+ * 騎法（§10-2）：直線踩到極速的幾成、過彎半徑、彎前用幾成煞車力減速、提早幾公尺開始減速；
+ * 體力（§10-4）：push = 不懂配速，直線上一直按著踩衝極速；其他人到了直線速度就放開滑行，
+ * 加速時體力低於 reserve 就只在消耗不超過恢復時才踩，離終點 kick 公尺內按著踩衝極速、只留最後一點體力
+ */
 export interface AiStyle {
   pedal: number
   radius: number
   brake: number
   margin: number
+  push: boolean
+  reserve: number
+  kick: number
 }
 
-/** AI 1（k = 0）最弱，AI 5 最強 */
+/** AI 1（k = 0）最弱：AI 1、2 不懂配速，一路衝到沒力；AI 3–5 留著體力，最後衝刺 */
 export const AI_STYLES: readonly AiStyle[] = [
-  { pedal: 0.92, radius: 5, brake: 0.7, margin: 4 },
-  { pedal: 0.94, radius: 5.5, brake: 0.75, margin: 3 },
-  { pedal: 0.96, radius: 5.5, brake: 0.8, margin: 2 },
-  { pedal: 0.98, radius: 6, brake: 0.85, margin: 1.5 },
-  { pedal: 1, radius: 6.5, brake: 0.9, margin: 1 },
+  { pedal: 0.92, radius: 5, brake: 0.7, margin: 4, push: true, reserve: 0, kick: 0 },
+  { pedal: 0.94, radius: 5.5, brake: 0.75, margin: 3, push: false, reserve: 0, kick: 0 },
+  { pedal: 0.96, radius: 5.5, brake: 0.8, margin: 2, push: false, reserve: 0.2, kick: 60 },
+  { pedal: 0.98, radius: 6, brake: 0.85, margin: 1.5, push: false, reserve: 0.3, kick: 90 },
+  { pedal: 1, radius: 6.5, brake: 0.9, margin: 1, push: false, reserve: 0.35, kick: 120 },
 ]
 
 /** 一台 AI 的編號（決定停車位與騎法）與組裝出來的腳踏車 */
@@ -218,9 +228,28 @@ function wrapAngle(a: number): number {
   return Math.atan2(Math.sin(a), Math.cos(a))
 }
 
-function throttle(speed: number, target: number): number {
-  if (speed < target - 0.2) return 1
+/** 離終點 kick 公尺內：最後衝刺 */
+function sprinting(ai: AiRider, style: AiStyle, course: Course): boolean {
+  if (ai.cp !== course.checkpoints.length - 1) return false
+  const finish = checkpointPos(course, ai.cp)
+  return Math.hypot(finish.x - ai.bike.pos.x, finish.z - ai.bike.pos.z) <= style.kick
+}
+
+/** 直線上的目標速度（§10-4）：push 時按著踩衝極速；衝刺時體力還有就衝極速；否則踩到直線速度就放開 */
+function pace(spec: VehicleSpec, style: AiStyle, stamina: Stamina, sprint: boolean): { speed: number; push: boolean } {
+  const push = style.push || (sprint && stamina.level > SPRINT_RESERVE)
+  return { speed: push ? spec.maxSpeed : cruiseSpeed(spec, style), push }
+}
+
+/** 想加速時這一刻真的踩不踩（§10-4）：體力高於 reserve 就踩；低於時只在這一刻的消耗不超過放開時的恢復才踩，體力不會再往下掉 */
+function willPedal(stamina: Stamina, style: AiStyle): boolean {
+  return stamina.level > style.reserve || drainRate(stamina.effort) <= regenRate(stamina.level)
+}
+
+/** 低於目標速度就踩、高出太多就煞；hold 時到了目標速度也一直按著踩 */
+function throttle(speed: number, target: number, hold: boolean): number {
   if (speed > target + 0.5) return -1
+  if (speed < target - 0.2 || (hold && speed <= target + 0.5)) return 1
   return 0
 }
 
@@ -290,7 +319,7 @@ function hazardSpeed(spec: VehicleSpec, bike: BikeState, aims: readonly number[]
 
 function respawn(ai: AiRider, course: Course): AiRider {
   const pose = nodePose(course, ai.wp - 1)
-  return { ...ai, bike: restingBike(pose), anchor: pose.pos, still: 0 }
+  return { ...ai, bike: { ...restingBike(pose), stamina: ai.bike.stamina }, anchor: pose.pos, still: 0 }
 }
 
 /** 選手的碰撞圓；已完賽的選手不參與碰撞；知道車頭與速度時帶上速度供 AI 預判 */
@@ -333,7 +362,7 @@ function park(ai: AiRider, driver: AiDriver, course: Course, dt: number, collide
   if (distance < PARK_ARRIVE) return speed === 0 ? ai : { ...ai, bike: { ...ai.bike, speed: 0 } }
   const error = wrapAngle(Math.atan2(slot.x - pos.x, slot.z - pos.z) - heading)
   const input: DriveInput = {
-    forward: throttle(speed, Math.min(PARK_SPEED, distance)),
+    forward: throttle(speed, Math.min(PARK_SPEED, distance), false),
     right: Math.max(-1, Math.min(1, -error * STEER_GAIN)),
     handbrake: false,
   }
@@ -383,11 +412,17 @@ export function stepAi(
   const crawl = speed < BALANCE_SPEED && lost ? CRAWL_SPEED : Infinity
   const probe = { x: pos.x + Math.sin(heading) * WALL_PROBE, z: pos.z + Math.cos(heading) * WALL_PROBE }
   // 倒退時轉向方向相反，所以 right 跟 error 同號；倒退速度壓在摔車門檻以下，撞到後面也只會彈開
+  const straight = pace(spec, style, ai.bike.stamina, sprinting(ai, style, course))
+  const goal = Math.min(straight.speed, ahead, turning, blocked, crawl)
+  // 只在直線上衝極速時按著踩，要減速過彎、跟車、慢騎時照常放開；衝刺結束退回直線速度時放開滑行，不煞車
+  const paced = goal === straight.speed
+  const want = Math.max(paced ? 0 : -1, throttle(speed, goal, straight.push && paced))
+  const sprintOrPush = straight.push && paced
   const input: DriveInput =
     speed < FEET_DOWN_SPEED && laneBlocked(pos, probe, colliders, [])
       ? { forward: speed > -CRAWL_SPEED ? -1 : 0, right: Math.max(-1, Math.min(1, error * STEER_GAIN)), handbrake: false }
       : {
-          forward: throttle(speed, Math.min(cruiseSpeed(spec, style), ahead, turning, blocked, crawl)),
+          forward: want > 0 && !sprintOrPush && !willPedal(ai.bike.stamina, style) ? 0 : want,
           right: steer(speed, -error * STEER_GAIN),
           handbrake: false,
         }

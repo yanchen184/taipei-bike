@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { isDown } from './bike'
+import { FULL_STAMINA } from './stamina'
 import { generateCity, roadCenter } from './city'
 import { circleHitsRect, type Circle } from './collide'
 import { createPlayer, mountBike, stepPlayer, type PlayerInput, type PlayerState } from './player'
@@ -128,7 +129,16 @@ describe('W2 組裝性能', () => {
     for (const build of [FAST, GRIPPY]) {
       const stats = buildStats(build)
       const start = mountBike(createPlayer(city), { pos: { x: 160, z: 160 }, heading: 0 }, bikeSpec(build))
-      const { state, frames } = ride(start, { forward: 1 }, 8, openCity)
+      // 這裡測零件不測體力：每秒補滿體力，一直踩也不會沒力
+      const seconds = Array.from({ length: 9 }).reduce<{ state: PlayerState; frames: PlayerState[] }>(
+        (acc) => {
+          const rested = { ...acc.state, bike: { ...acc.state.bike!, stamina: FULL_STAMINA } }
+          const next = ride(rested, { forward: 1 }, 1, openCity)
+          return { state: next.state, frames: [...acc.frames, ...next.frames] }
+        },
+        { state: start, frames: [] },
+      )
+      const { state, frames } = seconds
       expect(Math.max(...frames.map((f) => f.bike!.speed))).toBe(stats.top)
       expect(state.bike!.speed).toBe(stats.top)
       expect(frames[0]!.bike!.speed).toBeCloseTo(stats.accel * DT, 9)

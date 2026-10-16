@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { AI_STEP, aiDriver, createAi, parkSlot, riderCircles, stepAi, type AiDriver, type AiRider } from './ai'
+import { AI_STEP, AI_STYLES, aiDriver, createAi, parkSlot, riderCircles, stepAi, type AiDriver, type AiRider } from './ai'
 import { aiBuild } from './balance'
 import { CRASH_SPEED, isDown } from './bike'
 import { ROAD_COUNT, ROAD_WIDTH, SIDEWALK, generateCity, roadCenter } from './city'
@@ -217,5 +217,46 @@ describe('A1 AI 騎士', () => {
       if (off.length > 0) summary.push(`seed ${seed} 局 ${n}: ${off.length} ${off.slice(0, 2).join(' ')} … ${off.slice(-1).join('')}`)
     }
     expect(summary).toEqual([])
+  }, 120_000)
+})
+
+describe('A3 AI 體力配速', () => {
+  const CASES = [[3, 1], [42, 2], [7, 4]] as const
+
+  /** 每台 AI 有沒有力竭過、進入最後衝刺那一刻與完賽時的體力 */
+  function staminaLog(seed: number, n: number) {
+    const city = generateCity(seed)
+    const course = generateCourse(city, n)
+    const finish = checkpointPos(course, course.checkpoints.length - 1)
+    const ks = [0, 1, 2, 3, 4]
+    const bonked = ks.map(() => false)
+    const kickAt: (number | null)[] = ks.map(() => null)
+    const { riders } = simulate(city, course, ks, RACE_LIMIT_MS / 1000, false, (rs) =>
+      rs.forEach((ai, i) => {
+        if (ai.fin) return
+        bonked[i] ||= ai.bike.stamina.spent
+        const near = ai.cp === course.checkpoints.length - 1 && Math.hypot(finish.x - ai.bike.pos.x, finish.z - ai.bike.pos.z) <= AI_STYLES[i]!.kick
+        if (near && kickAt[i] === null) kickAt[i] = ai.bike.stamina.level
+      }),
+    )
+    return { bonked, kickAt, end: riders.map((ai) => ai.bike.stamina.level) }
+  }
+
+  test('[A3-1] AI 1 不懂配速，直線上一直按著踩，每一局都會騎到沒力', () => {
+    for (const [seed, n] of CASES) expect(staminaLog(seed, n).bonked[0], `seed ${seed} 局 ${n}`).toBe(true)
+  }, 120_000)
+
+  test('[A3-2] AI 3 到 AI 5 會留體力，整局都不會騎到沒力', () => {
+    for (const [seed, n] of CASES) expect(staminaLog(seed, n).bonked.slice(2), `seed ${seed} 局 ${n}`).toEqual([false, false, false])
+  }, 120_000)
+
+  test('[A3-3] AI 3 到 AI 5 在終點前最後衝刺，把留下來的體力用掉', () => {
+    for (const [seed, n] of CASES) {
+      const { kickAt, end } = staminaLog(seed, n)
+      for (const i of [2, 3, 4]) {
+        expect(kickAt[i], `seed ${seed} 局 ${n} AI ${i + 1}`).not.toBeNull()
+        expect(kickAt[i]! - end[i]!, `seed ${seed} 局 ${n} AI ${i + 1}`).toBeGreaterThan(0.1)
+      }
+    }
   }, 120_000)
 })

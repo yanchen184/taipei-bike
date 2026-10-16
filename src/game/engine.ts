@@ -54,6 +54,10 @@ export interface HudSnapshot {
   speedKmh: number
   /** 騎車摔倒、還躺在地上 */
   fallen: boolean
+  /** 騎車時的體力百分比（0–100 整數），沒騎車時為 null */
+  stamina: number | null
+  /** 騎到沒力了，踩不動 */
+  spent: boolean
   prompt: string | null
   greeting: string | null
   placeLabel: string | null
@@ -347,6 +351,8 @@ export class GameEngine {
       mode: p.mode,
       speedKmh: Math.round(Math.abs((p.mode === 'bike' ? p.bike?.speed : p.car.speed) ?? 0) * 3.6),
       fallen: p.mode === 'bike' && p.bike !== null && isDown(p.bike),
+      stamina: p.mode === 'bike' && p.bike !== null ? Math.round(p.bike.stamina.level * 100) : null,
+      spent: p.mode === 'bike' && p.bike !== null && p.bike.stamina.spent,
       prompt,
       greeting: greet,
       placeLabel: inside ? inside.home.address : null,

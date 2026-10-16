@@ -28,6 +28,21 @@ export function Hud() {
           <span className="ml-1 text-sm">km/h</span>
         </div>
       )}
+      {hud.stamina !== null && (
+        <div
+          data-testid="stamina"
+          data-value={hud.stamina}
+          className={`pointer-events-none absolute bottom-28 w-40 rounded-xl bg-black/55 px-3 py-2 text-white ${riding ? MINIMAP_GAP : 'right-6'}`}
+        >
+          <div className="mb-1 flex justify-between text-xs">
+            <span>體力</span>
+            {hud.spent && <span data-testid="spent" className="font-bold text-red-400">沒力了</span>}
+          </div>
+          <div className="h-2 overflow-hidden rounded bg-white/20">
+            <div className={`h-full ${hud.spent ? 'bg-red-500' : hud.stamina < 30 ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${hud.stamina}%` }} />
+          </div>
+        </div>
+      )}
       {hud.fallen && (
         <div data-testid="fallen" className="pointer-events-none absolute left-1/2 top-1/3 -translate-x-1/2 rounded-xl bg-red-600/85 px-6 py-3 text-3xl font-black text-white">
           摔車了！

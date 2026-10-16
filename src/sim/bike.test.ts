@@ -109,3 +109,32 @@ describe('B2 摔車', () => {
     for (const f of hard) expect(Math.abs(f.lean)).toBeLessThanOrEqual(MAX_LEAN)
   })
 })
+
+describe('B3 體力（騎車）', () => {
+  test('[B3-4] 按住 W 往前踩會耗體力，放開、煞車與倒退都不耗而是恢復', () => {
+    const pedaled = ride(moving(0), { forward: 1 }, 2).state
+    expect(pedaled.stamina.level).toBeLessThan(1)
+    const tired = { ...moving(6), stamina: { level: 0.5, effort: 0, spent: false } }
+    expect(ride(tired, {}, 1).state.stamina.level).toBeGreaterThan(0.5)
+    expect(ride(tired, { forward: -1 }, 1).state.stamina.level).toBeGreaterThan(0.5)
+  })
+
+  test('[B3-4] 體力耗盡時按 W 也踩不動，只會滑行減速；恢復到 0.3 後又能加速', () => {
+    const { frames } = ride(moving(0), { forward: 1 }, 14)
+    const empty = frames.findIndex((f) => f.stamina.spent)
+    expect(empty).toBeGreaterThan(0)
+    const after = frames.slice(empty + 1, empty + 60)
+    for (const [k, f] of after.entries()) expect(f.speed).toBeLessThanOrEqual((k === 0 ? frames[empty]! : after[k - 1]!).speed)
+    // 耗盡後約 4 秒恢復，又踩得動、速度往上
+    const back = frames.findIndex((f, k) => k > empty && !f.stamina.spent)
+    expect((back - empty) * DT).toBeGreaterThan(3)
+    expect(frames[back + 30]!.speed).toBeGreaterThan(frames[back]!.speed)
+  })
+
+  test('[B3-4] 摔車倒地期間體力照常恢復', () => {
+    const tired = { ...moving(6, EAST, 5), stamina: { level: 0.4, effort: 0, spent: false } }
+    const { frames } = ride(tired, { forward: 1 }, 2, WALL)
+    const crash = frames.findIndex(isDown)
+    expect(frames[crash + 100]!.stamina.level).toBeGreaterThan(frames[crash]!.stamina.level)
+  })
+})

@@ -184,6 +184,23 @@ test.describe('B2 摔車', () => {
   })
 })
 
+test.describe('B3 體力', () => {
+  test('[B3-5] 騎車時 HUD 顯示體力條：按住 W 往前踩體力下降，放開後慢慢恢復', async ({ page }) => {
+    await startSolo(page)
+    await startRace(page, 0)
+    const bar = page.getByTestId('stamina')
+    const stamina = async () => Number(await bar.getAttribute('data-value'))
+    await expect(bar).toHaveAttribute('data-value', '100')
+    await page.keyboard.down('w')
+    await expect.poll(stamina, { timeout: 5_000 }).toBeLessThan(85)
+    await page.keyboard.up('w')
+    const low = await stamina()
+    await expect.poll(stamina, { timeout: 5_000 }).toBeGreaterThan(low)
+    await expect(page.getByTestId('spent')).toHaveCount(0)
+    await page.screenshot({ path: test.info().outputPath('stamina.png') })
+  })
+})
+
 /** 重生點在檢查點附近（依起跑格錯開），不一定剛好在中心 */
 const CHECKPOINT_SLACK = 8
 
