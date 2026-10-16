@@ -629,6 +629,27 @@ describe('N1 比賽同步', () => {
     expect(distance(shown[0]!.pos, latest)).toBeGreaterThan(0.6)
   })
 
+  test('[B2-6] 其他人畫面上的 AI 車身傾角跟著房主的 AI 落後 100 ms 內插', async () => {
+    const { me, other, ride, now } = twoRiders()
+    await me.controller.start(2)
+    await ride(10)
+    const lean = () => me.controller.aiRiders()[0]!.lean ?? 0
+    for (let k = 0; k < 6000 && Math.abs(lean()) < 0.15; k++) await ride(DT)
+    expect(Math.abs(lean())).toBeGreaterThanOrEqual(0.15)
+    const history: { t: number; lean: number }[] = [{ t: now(), lean: lean() }]
+    const shown: number[] = []
+    for (let k = 0; k < 15; k++) {
+      await ride(DT)
+      history.push({ t: now(), lean: lean() })
+      const past = history.filter((h) => h.t <= now() - INTERP_DELAY).at(-1)
+      if (!past || past === history[0]) continue
+      const drawn = other.controller.aiRiders()[0]!.lean ?? 0
+      expect(Math.abs(drawn - past.lean)).toBeLessThan(0.1)
+      shown.push(drawn)
+    }
+    expect(Math.max(...shown.map(Math.abs))).toBeGreaterThan(0.1)
+  }, 60_000)
+
   test('[N1-3] 房主離開後，新房主從最後同步的位置接手計算 AI', async () => {
     const { me, other, ride, room } = twoRiders()
     await me.controller.start(2)

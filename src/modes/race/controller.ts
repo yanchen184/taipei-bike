@@ -73,7 +73,7 @@ export interface RaceView {
 export interface AiPose {
   pos: Vec2
   heading: number
-  /** 車身傾角（rad，往右為正，倒地為 ±π/2）；只有房主算得出來，同步資料沒有時為 0 */
+  /** 車身傾角（rad，往右為正，倒地為 ±π/2）；同步資料沒有時為 0 */
   lean?: number
   cp: number
   fin: boolean
@@ -163,7 +163,7 @@ interface AiSample extends AiNet {
 
 /** samples 依 at 遞增，取 t 這個時間點的內插位置 */
 function interpolateAi(samples: readonly AiSample[], t: number): AiPose {
-  const pose = (a: AiSample, pos: Vec2, heading: number): AiPose => ({ pos, heading, cp: a.cp, fin: a.fin !== undefined })
+  const pose = (a: AiSample, pos: Vec2, heading: number, lean = a.l ?? 0): AiPose => ({ pos, heading, lean, cp: a.cp, fin: a.fin !== undefined })
   const first = samples[0]!
   const last = samples.at(-1)!
   if (t <= first.at) return pose(first, { x: first.x, z: first.z }, first.h)
@@ -172,7 +172,8 @@ function interpolateAi(samples: readonly AiSample[], t: number): AiPose {
   const a = samples[k - 1]!
   const b = samples[k]!
   const u = (t - a.at) / (b.at - a.at)
-  return pose(b, { x: a.x + (b.x - a.x) * u, z: a.z + (b.z - a.z) * u }, lerpAngle(a.h, b.h, u))
+  const lean = (a.l ?? 0) + ((b.l ?? 0) - (a.l ?? 0)) * u
+  return pose(b, { x: a.x + (b.x - a.x) * u, z: a.z + (b.z - a.z) * u }, lerpAngle(a.h, b.h, u), lean)
 }
 
 /** 一個 session 一個：管理目前這一局、房主推進 AI、切換競速模式 */
@@ -583,6 +584,7 @@ export class RaceController {
         s: a.bike.speed,
         w: a.wp,
         cp: a.cp,
+        l: a.bike.lean,
         ...(fin === undefined ? {} : { fin }),
       }
     })

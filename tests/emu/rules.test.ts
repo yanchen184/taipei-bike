@@ -112,6 +112,15 @@ describe('M5 安全規則', () => {
     await assertFails(db('bob').ref(`${ROOM}/states/bob`).set({ ...state, t: NOW, extra: 1 }))
   })
 
+  test('[B2-6] 狀態可以帶車身傾角 l（-1.6–1.6，倒地為 ±π/2），不帶也可以', async () => {
+    await assertSucceeds(join('bob', '1'))
+    await assertSucceeds(db('bob').ref(`${ROOM}/states/bob`).set({ ...state, mode: 'bike', l: Math.PI / 2, t: NOW }))
+    await assertSucceeds(db('bob').ref(`${ROOM}/states/bob`).set({ ...state, mode: 'bike', l: -0.4, t: NOW }))
+    await assertSucceeds(db('bob').ref(`${ROOM}/states/bob`).set({ ...state, t: NOW }))
+    await assertFails(db('bob').ref(`${ROOM}/states/bob`).set({ ...state, l: 2, t: NOW }))
+    await assertFails(db('bob').ref(`${ROOM}/states/bob`).set({ ...state, l: 'down', t: NOW }))
+  })
+
   test('沒占位子不能加入，沒加入不能寫狀態，房間不存在不能占位子', async () => {
     await assertFails(db('bob').ref(`${ROOM}/players/bob`).set(player('小美')))
     await assertFails(claim('bob', '1'))

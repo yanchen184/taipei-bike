@@ -35,7 +35,7 @@ export interface Progress {
   fin?: number
 }
 
-/** AI 的同步資料：位置、朝向、速度、下一個路口、已過檢查點、完成時間 */
+/** AI 的同步資料：位置、朝向、速度、下一個路口、已過檢查點、車身傾角、完成時間 */
 export interface AiNet {
   n: number
   x: number
@@ -44,6 +44,8 @@ export interface AiNet {
   s: number
   w: number
   cp: number
+  /** 車身傾角（rad，倒地為 ±π/2）；舊版房主不送 */
+  l?: number
   fin?: number
 }
 

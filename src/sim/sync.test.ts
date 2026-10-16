@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { generateCity } from './city'
-import { createPlayer } from './player'
+import { createPlayer, mountBike } from './player'
 import {
   INTERP_DELAY,
   INTERP_KEEP,
@@ -27,7 +27,7 @@ import {
 } from './sync'
 
 function sample(at: number, x: number, h: number): RemoteSample {
-  return { at, x, z: 0, h, mode: 'walk', cx: 0, cz: 0, ch: 0, loc: 'outdoor' }
+  return { at, x, z: 0, h, mode: 'walk', cx: 0, cz: 0, ch: 0, loc: 'outdoor', l: 0 }
 }
 
 describe('M2 位置同步', () => {
@@ -133,8 +133,20 @@ describe('M1 房號與人數', () => {
 describe('M2 同步格式與補間', () => {
   test('[M2-1] 玩家狀態轉成同步格式，帶出步行／開車、車子與所在地點', () => {
     const p = createPlayer(generateCity(7))
-    expect(toNetState(p)).toEqual({ x: p.pos.x, z: p.pos.z, h: p.heading, mode: 'walk', cx: p.car.pos.x, cz: p.car.pos.z, ch: p.car.heading, loc: OUTDOOR })
+    expect(toNetState(p)).toEqual({ x: p.pos.x, z: p.pos.z, h: p.heading, mode: 'walk', cx: p.car.pos.x, cz: p.car.pos.z, ch: p.car.heading, loc: OUTDOOR, l: 0 })
     expect(toNetState({ ...p, location: { kind: 'home', homeId: 'h3' } }).loc).toBe('h3')
+  })
+
+  test('[B2-6] 騎車時同步車身傾角，倒地時為 ±π/2；補間時傾角線性內插', () => {
+    const p = createPlayer(generateCity(7))
+    const down = mountBike(p, { pos: p.pos, heading: 0 })
+    const lying = { ...down, bike: { ...down.bike!, lean: -Math.PI / 2, down: 2 } }
+    expect(toNetState(lying).l).toBeCloseTo(-Math.PI / 2, 9)
+    expect(toNetState(p).l).toBe(0)
+    const a = { ...toNetState(down), at: 1000 }
+    const b = { ...toNetState(lying), at: 1100 }
+    expect(interpolate([a, b], 1050 + INTERP_DELAY)!.l).toBeCloseTo(-Math.PI / 4, 9)
+    expect(sameNetState(a, { ...a, l: 0.2 })).toBe(false)
   })
 
   test('[M2-1] 世界時間 = 伺服器時間 − 房間建立時間（秒）', () => {

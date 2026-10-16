@@ -30,7 +30,7 @@ afterEach(closeClients)
 
 afterAll(() => env.cleanup())
 
-const STATE: NetState = { x: 1, z: 2, h: 0.5, mode: 'drive', cx: 1, cz: 2, ch: 0.5, loc: 'outdoor' }
+const STATE: NetState = { x: 1, z: 2, h: 0.5, mode: 'drive', cx: 1, cz: 2, ch: 0.5, loc: 'outdoor', l: 0 }
 
 async function errorCode(task: Promise<unknown>): Promise<string> {
   try {

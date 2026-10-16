@@ -123,6 +123,13 @@ describe('N2 比賽安全規則', () => {
     await assertSucceeds(db('alice').ref(RACE).update({ 'ai/0': aiNet(), 'ai/1': aiNet() }))
   })
 
+  test('[B2-6] AI 可以帶車身傾角 l（-1.6–1.6），不帶也可以', async () => {
+    await assertSucceeds(db('alice').ref(`${RACE}/ai/0`).set({ ...aiNet(), l: -Math.PI / 2 }))
+    await assertSucceeds(db('alice').ref(`${RACE}/ai/0`).set(aiNet()))
+    await assertFails(db('alice').ref(`${RACE}/ai/0`).set({ ...aiNet(), l: -2 }))
+    await assertFails(db('alice').ref(`${RACE}/ai/0`).set({ ...aiNet(), l: true }))
+  })
+
   test('[N2-1] AI 的完成時間必須是伺服器時間，寫入後不能改也不能刪', async () => {
     await assertFails(db('alice').ref(`${RACE}/ai/0`).set({ ...aiNet(), fin: 5 }))
     await assertSucceeds(db('alice').ref(`${RACE}/ai/0`).set({ ...aiNet(), fin: NOW }))

@@ -66,6 +66,9 @@
               "ch": {
                 ".validate": "newData.isNumber()"
               },
+              "l": {
+                ".validate": "newData.isNumber() && newData.val() >= -1.6 && newData.val() <= 1.6"
+              },
               "loc": {
                 ".validate": "newData.isString() && newData.val().length <= 64"
               },
@@ -130,6 +133,9 @@
                 },
                 "cp": {
                   ".validate": "newData.isNumber()"
+                },
+                "l": {
+                  ".validate": "newData.isNumber() && newData.val() >= -1.6 && newData.val() <= 1.6"
                 },
                 "fin": {
                   ".validate": "(!data.exists() && newData.val() === now) || newData.val() === data.val()"

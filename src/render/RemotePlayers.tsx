@@ -50,7 +50,7 @@ function RemotePlayer({ online, uid, name, color, labelRoot }: RemotePlayerProps
     if (bike.current) {
       bike.current.visible = shown.mode === 'bike'
       bike.current.position.set(shown.x, 0, shown.z)
-      bike.current.rotation.y = shown.h
+      bike.current.rotation.set(0, shown.h, shown.l)
     }
     if (label.current) {
       if (shown.mode !== 'drive') label.current.position.set(shown.x, 2.4, shown.z)

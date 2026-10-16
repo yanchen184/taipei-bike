@@ -47,7 +47,7 @@ function fakeLink(reply: (state: NetState) => Promise<void> = async () => undefi
 }
 
 function net(x: number, loc = OUTDOOR): NetState {
-  return { x, z: 0, h: 0, mode: 'walk', cx: 0, cz: 0, ch: 0, loc }
+  return { x, z: 0, h: 0, mode: 'walk', cx: 0, cz: 0, ch: 0, loc, l: 0 }
 }
 
 const players = (entries: [string, string, number][]): Record<string, RoomPlayer> =>

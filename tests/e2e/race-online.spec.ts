@@ -203,6 +203,27 @@ test.describe('N1 比賽同步（兩個 browser context）', () => {
   })
 })
 
+test.describe('B2 摔車（連線）', () => {
+  test('[B2-6] 一位玩家摔車時，另一位玩家畫面上他的腳踏車倒在地上，扶起後恢復直立', async ({ page, guest }) => {
+    test.setTimeout(120_000)
+    await roomOfTwo(page, guest)
+    await startRace(page, 0, [page, guest])
+    const host = (await remote(guest, '阿明'))!
+    const roll = () => guest.evaluate((n) => window.__taipei!.roll(n), `remote-bike-${host.uid}`)
+    const speed = async () => (await page.evaluate(() => window.__taipei!.state())).player.bike!.speed
+    // 跟 B2-5 一樣：起步後放開 W、按住 D，低速硬轉就倒
+    await page.keyboard.down('w')
+    await expect.poll(speed, { intervals: [20] }).toBeGreaterThan(1.8)
+    await page.keyboard.up('w')
+    await page.keyboard.down('d')
+    await expect(page.getByTestId('fallen')).toBeVisible({ timeout: 8_000 })
+    await page.keyboard.up('d')
+    await expect.poll(async () => Math.abs((await roll()) ?? 0), { timeout: 3_000 }).toBeGreaterThan(1.4)
+    await expect(page.getByTestId('fallen')).toHaveCount(0, { timeout: 2_500 })
+    await expect.poll(async () => Math.abs((await roll()) ?? 1), { timeout: 3_000 }).toBeLessThan(0.1)
+  })
+})
+
 test.describe('W1 整備站（連線）', () => {
   test('[W1-3] 連線時沒有「出發」，顯示整備倒數，20 秒後所有人同時進入倒數', async ({ page, guest }) => {
     test.setTimeout(90_000)

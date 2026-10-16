@@ -22,4 +22,15 @@
 | A1-9 | `sim/ai.test.ts`：整條路被擋時煞停、不摔車 |
 | W2 | `sim/parts.test.ts`、`sim/balance.test.ts`：極速組裝超過 50 km/h、煞車零件縮短停車距離 |
 
-既有節點必須維持通過。不動資料庫規則：線上其他玩家看不到摔車與傾斜，要同步需另改規則。
+既有節點必須維持通過。
+
+## 追加：連線同步傾角（B2-6）
+
+- `database.rules.json`：`states/$uid` 與 `race/ai/$k` 可帶選填的 `l`（-1.6–1.6 rad），舊版不送也通過。
+- `sim/sync.ts`、`net/rooms.ts`：`NetState.l` 同步、補間；讀到舊資料時為 0。
+- `modes/race/controller.ts`、`sim/race.ts`：AI 同步帶 `l`，非房主補間傾角。
+- `render/RemotePlayers.tsx`：其他玩家的腳踏車照傾角畫。
+
+| 編號 | 測試 |
+|---|---|
+| B2-6 | `sim/sync.test.ts`、`modes/race/controller.test.ts`、`tests/emu/rules.test.ts`、`tests/emu/race-rules.test.ts`、`tests/e2e/race-online.spec.ts` |

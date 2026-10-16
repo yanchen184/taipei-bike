@@ -41,6 +41,8 @@ export interface TaipeiDebug {
   hasObject(name: string): boolean
   /** 這個名字的物件畫在畫面上時的世界座標；不存在或本身、上層被隱藏時為 null */
   shown(name: string): Vec2 | null
+  /** 這個名字的物件自己的翻滾角（rotation.z，腳踏車的車身傾角）；不存在時為 null */
+  roll(name: string): number | null
   /** 這個名字的物件底下 mesh 的最低不透明度；不存在時為 null */
   opacity(name: string): number | null
 }
@@ -113,6 +115,7 @@ export function installDebug(
       const e = object.matrixWorld.elements
       return { x: e[12]!, z: e[14]! }
     },
+    roll: (name) => scene?.getObjectByName(name)?.rotation.z ?? null,
     opacity: (name) => {
       const object = scene?.getObjectByName(name)
       if (!object) return null

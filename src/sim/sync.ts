@@ -38,6 +38,8 @@ export interface NetState {
   cz: number
   ch: number
   loc: string
+  /** 腳踏車車身傾角（rad，往右為正，倒地為 ±π/2）；沒騎車時為 0 */
+  l: number
 }
 
 export interface RemoteSample extends NetState {
@@ -64,7 +66,7 @@ export function lerpAngle(a: number, b: number, u: number): number {
 }
 
 export function blankNetState(): NetState {
-  return { x: 0, z: 0, h: 0, mode: 'walk', cx: 0, cz: 0, ch: 0, loc: OUTDOOR }
+  return { x: 0, z: 0, h: 0, mode: 'walk', cx: 0, cz: 0, ch: 0, loc: OUTDOOR, l: 0 }
 }
 
 function copyInto(src: NetState, out: NetState): void {
@@ -76,6 +78,7 @@ function copyInto(src: NetState, out: NetState): void {
   out.cz = src.cz
   out.ch = src.ch
   out.loc = src.loc
+  out.l = src.l
 }
 
 /**
@@ -104,6 +107,7 @@ export function writeInterpolated(samples: readonly RemoteSample[], renderNow: n
       out.cz = a.cz + (b.cz - a.cz) * u
       out.ch = lerpAngle(a.ch, b.ch, u)
       out.loc = b.loc
+      out.l = a.l + (b.l - a.l) * u
       return true
     }
   }
@@ -131,6 +135,7 @@ export function toNetState(player: PlayerState): NetState {
     cz: player.car.pos.z,
     ch: player.car.heading,
     loc: player.location.kind === 'home' ? player.location.homeId : OUTDOOR,
+    l: player.mode === 'bike' && player.bike ? player.bike.lean : 0,
   }
 }
 
@@ -144,7 +149,8 @@ export function sameNetState(a: NetState | null, b: NetState): boolean {
     a.cx === b.cx &&
     a.cz === b.cz &&
     a.ch === b.ch &&
-    a.loc === b.loc
+    a.loc === b.loc &&
+    a.l === b.l
   )
 }
 

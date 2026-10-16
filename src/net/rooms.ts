@@ -72,8 +72,9 @@ function isPermissionDenied(error: unknown): boolean {
 }
 
 function readState(snap: DataSnapshot): NetState {
-  const v = snap.val() as NetState
-  return { x: v.x, z: v.z, h: v.h, mode: v.mode, cx: v.cx, cz: v.cz, ch: v.ch, loc: v.loc }
+  const v = snap.val() as Omit<NetState, 'l'> & { l?: number }
+  // 舊版不送傾角
+  return { x: v.x, z: v.z, h: v.h, mode: v.mode, cx: v.cx, cz: v.cz, ch: v.ch, loc: v.loc, l: v.l ?? 0 }
 }
 
 export function createRoomRepository(db: Database): RoomRepository {
