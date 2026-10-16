@@ -30,7 +30,7 @@ function AiBike({ controller, k }: { controller: RaceController; k: number }) {
     g.visible = ai !== undefined
     if (!ai) return
     g.position.set(ai.pos.x, 0, ai.pos.z)
-    g.rotation.y = ai.heading
+    g.rotation.set(0, ai.heading, ai.lean ?? 0)
   })
   useNearCameraFade(group)
   return (

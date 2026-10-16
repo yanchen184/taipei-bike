@@ -28,6 +28,11 @@ export function Hud() {
           <span className="ml-1 text-sm">km/h</span>
         </div>
       )}
+      {hud.fallen && (
+        <div data-testid="fallen" className="pointer-events-none absolute left-1/2 top-1/3 -translate-x-1/2 rounded-xl bg-red-600/85 px-6 py-3 text-3xl font-black text-white">
+          摔車了！
+        </div>
+      )}
       <div data-testid="controls" className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-black/40 px-3 py-1 text-xs text-white/90">
         {riding ? RACE_CONTROLS : CONTROLS}
       </div>

@@ -1,6 +1,7 @@
 import { CAR_LANE_OFFSET, ROAD_WIDTH, SIDEWALK, nearestRoadPose } from './city'
 import { isFree, resolveCircle, type Circle } from './collide'
 import type { CityMap, Pose, Vec2 } from './types'
+import { moveBike, restingBike, type BikeState } from './bike'
 import { BIKE_SPEC, CAR_SPEC, moveVehicle, substeps, type VehicleSpec, type VehicleState } from './vehicle'
 
 export const WALK_SPEED = 4
@@ -27,7 +28,7 @@ export interface PlayerState {
   pos: Vec2
   heading: number
   car: CarState
-  bike: VehicleState | null
+  bike: BikeState | null
   /** 腳踏車的性能，由整備站的組裝決定 */
   bikeSpec: VehicleSpec
   location: Location
@@ -88,7 +89,7 @@ function stepDrive(state: PlayerState, input: PlayerInput, dt: number, city: Cit
 
 function stepBike(state: PlayerState, input: PlayerInput, dt: number, city: CityMap, obstacles: readonly Circle[]): PlayerState {
   if (!state.bike) return state
-  const bike = moveVehicle(state.bike, state.bikeSpec, { ...input, handbrake: false }, dt, city.colliders, obstacles)
+  const bike = moveBike(state.bike, state.bikeSpec, { ...input, handbrake: false }, dt, city.colliders, obstacles)
   return { ...state, pos: bike.pos, heading: bike.heading, bike }
 }
 
@@ -145,15 +146,15 @@ export function exitCar(state: PlayerState, city: CityMap): PlayerState {
   return { ...stepOff(state, state.car, CAR_RADIUS, city), car: { ...state.car, speed: 0 } }
 }
 
-/** 騎上腳踏車：放在指定位置、速度 0、地點設為戶外；不給 spec 時沿用原本的性能 */
+/** 騎上腳踏車：放在指定位置、速度 0、扶正、地點設為戶外；不給 spec 時沿用原本的性能 */
 export function mountBike(state: PlayerState, pose: Pose, spec: VehicleSpec = state.bikeSpec): PlayerState {
-  const bike = { pos: pose.pos, heading: pose.heading, speed: 0 }
+  const bike = restingBike(pose)
   return { ...state, mode: 'bike', pos: pose.pos, heading: pose.heading, bike, bikeSpec: spec, location: { kind: 'outdoor' } }
 }
 
 export function dismountBike(state: PlayerState, city: CityMap): PlayerState {
   if (state.mode !== 'bike' || !state.bike) return state
-  return { ...stepOff(state, state.bike, BIKE_SPEC.radius, city), bike: { ...state.bike, speed: 0 } }
+  return { ...stepOff(state, state.bike, BIKE_SPEC.radius, city), bike: restingBike(state.bike) }
 }
 
 export function callCar(state: PlayerState, city: CityMap): PlayerState {

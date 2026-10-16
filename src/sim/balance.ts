@@ -6,9 +6,9 @@ import type { Vec2 } from './types'
 import type { VehicleSpec } from './vehicle'
 
 /** AI 1–5 從排名前幾成的組裝中隨機挑一套；AI 5 一定挑第一名（§10-2） */
-const PICK_WINDOW = [1, 0.6, 0.3, 0.12, 0]
+const PICK_WINDOW = [0.3, 0.2, 0.1, 0.05, 0]
 /** 每個彎出彎修正方向多花的秒數 ÷（直線速度 − 過彎速度），由騎法模擬校正 */
-const TURN_PENALTY = 0.16
+const TURN_PENALTY = 0.05
 
 /** 賽道拆成一段段直線（同方向的路段合併），回傳每段長度 */
 export function straights(course: Course): number[] {

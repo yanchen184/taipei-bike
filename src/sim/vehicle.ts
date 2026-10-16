@@ -53,7 +53,7 @@ export const BIKE_SPEC: VehicleSpec = {
   maxSpeed: 12,
   maxReverse: 3,
   accel: 3,
-  brake: 10,
+  brake: 5,
   reverseAccel: 2,
   drag: 1,
   handbrake: 10,
@@ -75,6 +75,33 @@ function nextSpeed(speed: number, spec: VehicleSpec, input: DriveInput, dt: numb
   return toward(speed, 0, spec.drag)
 }
 
+/** 一個子步的結果：impact 是撞到東西時撞擊前的速度，沒撞到為 null */
+export interface VehicleMove {
+  state: VehicleState
+  impact: number | null
+  /** 這個子步的轉向角速度（rad/s，往右為正） */
+  yawRate: number
+}
+
+/** 推進一個子步並回報碰撞；呼叫端負責讓 maxSpeed × dt 不超過 MAX_SUBSTEP_MOVE */
+export function advanceVehicle(
+  v: VehicleState,
+  spec: VehicleSpec,
+  input: DriveInput,
+  dt: number,
+  colliders: readonly Rect[],
+  obstacles: readonly Circle[],
+): VehicleMove {
+  const speed = nextSpeed(v.speed, spec, input, dt)
+  const fast = spec.corner !== undefined && Math.abs(speed) > spec.corner ? spec.corner / Math.abs(speed) : 1
+  const grip = Math.min(1, Math.abs(speed) / spec.fullTurnSpeed) * Math.sign(speed) * fast
+  const yawRate = input.right * spec.turnRate * grip
+  const heading = v.heading - yawRate * dt
+  const target = { x: v.pos.x + Math.sin(heading) * speed * dt, z: v.pos.z + Math.cos(heading) * speed * dt }
+  const { pos, hit } = resolveCircle(target, spec.radius, colliders, obstacles)
+  return { state: { pos, heading, speed: hit ? -speed * BOUNCE : speed }, impact: hit ? speed : null, yawRate }
+}
+
 /** 推進一個子步；呼叫端負責讓 maxSpeed × dt 不超過 MAX_SUBSTEP_MOVE */
 export function moveVehicle(
   v: VehicleState,
@@ -84,13 +111,7 @@ export function moveVehicle(
   colliders: readonly Rect[],
   obstacles: readonly Circle[],
 ): VehicleState {
-  const speed = nextSpeed(v.speed, spec, input, dt)
-  const fast = spec.corner !== undefined && Math.abs(speed) > spec.corner ? spec.corner / Math.abs(speed) : 1
-  const grip = Math.min(1, Math.abs(speed) / spec.fullTurnSpeed) * Math.sign(speed) * fast
-  const heading = v.heading - input.right * spec.turnRate * grip * dt
-  const target = { x: v.pos.x + Math.sin(heading) * speed * dt, z: v.pos.z + Math.cos(heading) * speed * dt }
-  const { pos, hit } = resolveCircle(target, spec.radius, colliders, obstacles)
-  return { pos, heading, speed: hit ? -speed * BOUNCE : speed }
+  return advanceVehicle(v, spec, input, dt, colliders, obstacles).state
 }
 
 export function substeps(maxSpeed: number, dt: number): number {

@@ -3,6 +3,8 @@ import type { Rect, Vec2 } from './types'
 export interface Circle {
   pos: Vec2
   radius: number
+  /** 移動中的碰撞物每秒的位移，供 AI 預判；沒有時視為靜止 */
+  vel?: Vec2
 }
 
 export function rect(minX: number, minZ: number, maxX: number, maxZ: number): Rect {

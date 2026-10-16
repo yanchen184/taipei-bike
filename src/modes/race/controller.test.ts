@@ -612,7 +612,8 @@ describe('N1 比賽同步', () => {
   test('[N1-2] AI 只由房主計算並寫入，其他人畫面上的 AI 落後 100 ms 跟著房主寫入的位置移動', async () => {
     const { me, other, ride, room, now } = twoRiders()
     await me.controller.start(2)
-    await ride(6)
+    // 起跑格前面的玩家沒起步，AI 要先繞過去；騎開之後再量
+    await ride(10)
     const history: { t: number; pos: Vec2 }[] = []
     for (let k = 0; k < 30; k++) {
       await ride(DT)
@@ -660,7 +661,8 @@ describe('N1 比賽同步', () => {
   test('[N1-3] 開賽後才加入的玩家成為房主時接手推進 AI，但不參賽', async () => {
     const { me, other, ride, room, rider } = twoRiders()
     await me.controller.start(2)
-    await ride(5)
+    // 起跑格前面的玩家沒起步，AI 要先繞過去；騎開之後再量
+    await ride(9)
     room.join({ id: 'late', name: '阿花' })
     const late = rider('late', '阿花')
     await ride(DT, [me, other, late])
@@ -698,7 +700,8 @@ describe('N1 比賽同步', () => {
   test('[N1-3] 房主退出比賽回到城市後仍繼續推進並寫入 AI', async () => {
     const { me, other, ride } = twoRiders()
     await me.controller.start(2)
-    await ride(5)
+    // 起跑格前面的玩家沒起步，AI 要先繞過去；騎開之後再量
+    await ride(9)
     me.controller.leave()
     expect(me.inRace()).toBe(false)
     const before = other.controller.aiRiders().map((a) => a.pos)
@@ -709,7 +712,8 @@ describe('N1 比賽同步', () => {
   test('[N1-3] 已退出比賽的玩家成為房主時也會接手推進 AI', async () => {
     const { me, other, ride, room } = twoRiders()
     await me.controller.start(2)
-    await ride(5)
+    // 起跑格前面的玩家沒起步，AI 要先繞過去；騎開之後再量
+    await ride(9)
     other.controller.leave()
     room.leave('me')
     await ride(DT, [other])
@@ -766,7 +770,8 @@ describe('G1 開新的一局被拒絕', () => {
     }, (e) => errors.push(e))
 
     await controller.start(2)
-    await ride(4)
+    // 起跑格前面的玩家沒起步，AI 要先繞過去；騎開之後再量
+    await ride(8)
     reject = true
     await controller.start(0)
     expect(errors.map((e) => e.message)).toEqual(['權限不足'])

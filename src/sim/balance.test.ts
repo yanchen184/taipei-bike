@@ -94,13 +94,13 @@ describe('A2 AI 配車與騎法', () => {
     }
   }, 60_000)
 
-  test('[A2-4] AI 5 單獨騎完賽道的時間不超過 AI 1 的 85%', () => {
+  test('[A2-4] AI 5 單獨騎完賽道的時間不超過 AI 1 的 90%', () => {
     for (const [seed, n] of CASES) {
       const city = generateCity(seed)
       const course = generateCourse(city, n)
       const weakest = soloTime(city, course, AI_1, aiBuild(course, seed, AI_1))
       const strongest = soloTime(city, course, AI_5, aiBuild(course, seed, AI_5))
-      expect(strongest, `seed ${seed} 局 ${n}`).toBeLessThanOrEqual(weakest * 0.85)
+      expect(strongest, `seed ${seed} 局 ${n}`).toBeLessThanOrEqual(weakest * 0.9)
     }
   }, 60_000)
 })

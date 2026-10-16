@@ -46,14 +46,14 @@ describe('W1 整備站', () => {
 
 describe('W2 組裝性能', () => {
   test('[W2-1] 組裝的四項性能等於基準加上四個零件的效果', () => {
-    expect(BASE_STATS).toEqual({ top: 12, accel: 3, corner: 6, brake: 10 })
+    expect(BASE_STATS).toEqual({ top: 12, accel: 3, corner: 6, brake: 5 })
     expect(buildStats(CHEAPEST)).toEqual(BASE_STATS)
-    expect(buildStats(DEFAULT_BUILD)).toEqual({ top: 11.5, accel: 5, corner: 10, brake: 10 })
-    expect(buildStats({ frame: 'carbon', wheel: 'slick', drive: 'single', bar: 'flat' })).toEqual({ top: 14, accel: 3.5, corner: 4, brake: 10 })
-    expect(buildStats({ frame: 'steel', wheel: 'grip', drive: 'tall', bar: 'drop' })).toEqual({ top: 13, accel: 2, corner: 8, brake: 13 })
+    expect(buildStats(DEFAULT_BUILD)).toEqual({ top: 11.5, accel: 5, corner: 10, brake: 5 })
+    expect(buildStats({ frame: 'carbon', wheel: 'slick', drive: 'single', bar: 'flat' })).toEqual({ top: 16, accel: 3.5, corner: 5, brake: 5 })
+    expect(buildStats({ frame: 'steel', wheel: 'grip', drive: 'tall', bar: 'drop' })).toEqual({ top: 15, accel: 2, corner: 8, brake: 8 })
 
     const spec = bikeSpec(DEFAULT_BUILD)
-    expect([spec.maxSpeed, spec.accel, spec.corner, spec.brake]).toEqual([11.5, 5, 10, 10])
+    expect([spec.maxSpeed, spec.accel, spec.corner, spec.brake]).toEqual([11.5, 5, 10, 5])
     expect(buildLabel(DEFAULT_BUILD)).toBe('鋁合金＋通勤輪＋輕齒比＋短龍頭')
     expect(PARTS.every((p) => p.price > 0)).toBe(true)
   })

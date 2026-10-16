@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest'
+import { isDown } from './bike'
 import { generateCity, roadCenter } from './city'
 import { circleHitsRect, type Circle } from './collide'
 import { createPlayer, mountBike, stepPlayer, type PlayerInput, type PlayerState } from './player'
@@ -61,31 +62,43 @@ describe('B1 騎車', () => {
     expect(left.bike!.heading).toBeGreaterThan(0.4)
   })
 
-  test('[B1-4] 撞邊界牆後被推回牆外，速度變為反向 30%', () => {
+  test('[B1-4] 撞邊界牆後被推回牆外，撞擊速度超過 1 m/s 時摔車、速度歸零', () => {
     const start = rider({ pos: { x: 250, z: roadCenter(2) }, heading: EAST }, BIKE_SPEC.maxSpeed)
     const { frames } = ride(start, { forward: 1 }, 10, city, FINE_DT)
-    const hit = frames.findIndex((f, k) => k > 0 && f.bike!.speed < 0)
+    const hit = frames.findIndex((f) => isDown(f.bike!))
     expect(hit).toBeGreaterThan(0)
     expect(frames[hit - 1]!.bike!.speed).toBe(BIKE_SPEC.maxSpeed)
-    expect(frames[hit]!.bike!.speed).toBeCloseTo(-BIKE_SPEC.maxSpeed * BOUNCE, 9)
-    expect(BOUNCE).toBe(0.3)
+    expect(frames[hit]!.bike!.speed).toBe(0)
     for (const f of frames) {
       expect(city.colliders.some((r) => circleHitsRect(f.bike!.pos, BIKE_SPEC.radius, r))).toBe(false)
       expect(f.bike!.pos.x).toBeLessThanOrEqual(city.size - BIKE_SPEC.radius + 1e-9)
     }
   })
 
-  test('[B1-4] 撞建築物後被推回建築物外，速度變為反向 30%', () => {
+  test('[B1-4] 撞建築物後被推回建築物外，撞擊速度超過 1 m/s 時摔車、速度歸零', () => {
     const building = city.colliders.find((r) => r.maxX - r.minX > 4 && r.maxZ - r.minZ > 4)!
     const onlyBuilding: CityMap = { ...city, colliders: [building] }
     const z = (building.minZ + building.maxZ) / 2
     const start = rider({ pos: { x: building.minX - 5, z }, heading: EAST }, BIKE_SPEC.maxSpeed)
     const { frames } = ride(start, { forward: 1 }, 10, onlyBuilding, FINE_DT)
-    const hit = frames.findIndex((f, k) => k > 0 && f.bike!.speed < 0)
+    const hit = frames.findIndex((f) => isDown(f.bike!))
     expect(hit).toBeGreaterThan(0)
     expect(frames[hit - 1]!.bike!.speed).toBe(BIKE_SPEC.maxSpeed)
-    expect(frames[hit]!.bike!.speed).toBeCloseTo(-BIKE_SPEC.maxSpeed * BOUNCE, 9)
+    expect(frames[hit]!.bike!.speed).toBe(0)
     for (const f of frames) expect(circleHitsRect(f.bike!.pos, BIKE_SPEC.radius, building)).toBe(false)
+  })
+
+  test('[B1-4] 撞擊速度 1 m/s 以下只反彈，速度變為反向 30%', () => {
+    const building = city.colliders.find((r) => r.maxX - r.minX > 4 && r.maxZ - r.minZ > 4)!
+    const onlyBuilding: CityMap = { ...city, colliders: [building] }
+    const z = (building.minZ + building.maxZ) / 2
+    const start = rider({ pos: { x: building.minX - BIKE_SPEC.radius - 0.005, z }, heading: EAST }, 0.9)
+    const { frames } = ride(start, {}, 0.2, onlyBuilding, FINE_DT)
+    const hit = frames.findIndex((f) => f.bike!.speed < 0)
+    expect(hit).toBeGreaterThanOrEqual(0)
+    expect(frames.some((f) => isDown(f.bike!))).toBe(false)
+    expect(Math.abs(frames[hit]!.bike!.speed)).toBeLessThanOrEqual(0.9 * BOUNCE)
+    expect(BOUNCE).toBe(0.3)
   })
 
   test('子步數：dt 或最高速不是非負有限數時拋出 RangeError', () => {
@@ -95,12 +108,11 @@ describe('B1 騎車', () => {
     for (const max of [Infinity, NaN, -1]) expect(() => substeps(max, 1 / 30)).toThrow(RangeError)
   })
 
-  test('[B1-5] 撞到碰撞圓（NPC 車、選手、AI）時被推開並反彈', () => {
+  test('[B1-5] 撞到碰撞圓（NPC 車、選手、AI）時被推開不重疊，速度超過 1 m/s 時摔車', () => {
     const other: Circle = { pos: { x: 160, z: 166 }, radius: BIKE_SPEC.radius }
     const start = rider({ pos: { x: 160, z: 160 }, heading: 0 }, 10)
     const { frames } = ride(start, { forward: 1 }, 1, openCity, FINE_DT, [other])
-    const hit = frames.findIndex((f) => f.bike!.speed < 0)
-    expect(hit).toBeGreaterThanOrEqual(0)
+    expect(frames.some((f) => isDown(f.bike!))).toBe(true)
     for (const f of frames) {
       const d = Math.hypot(f.bike!.pos.x - other.pos.x, f.bike!.pos.z - other.pos.z)
       expect(d).toBeGreaterThanOrEqual(BIKE_SPEC.radius + other.radius - 1e-9)

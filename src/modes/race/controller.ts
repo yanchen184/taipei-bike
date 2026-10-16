@@ -1,5 +1,6 @@
 import type { Action, EngineHooks, GameEngine, GameState } from '../../game/engine'
 import { AI_STEP, aiDriver, createAi, riderCircles, stepAi, type AiDriver, type AiRider } from '../../sim/ai'
+import { restingBike } from '../../sim/bike'
 import { aiBuild } from '../../sim/balance'
 import { advanceCheckpoint, distanceToNext, generateCourse, nextTurn, respawnPose, type Course, type TurnKind } from '../../sim/course'
 import { DEFAULT_BUILD, bikeSpec, buildLabel, swapPart, type Build, type PartSlot } from '../../sim/parts'
@@ -72,6 +73,8 @@ export interface RaceView {
 export interface AiPose {
   pos: Vec2
   heading: number
+  /** 車身傾角（rad，往右為正，倒地為 ±π/2）；只有房主算得出來，同步資料沒有時為 0 */
+  lean?: number
   cp: number
   fin: boolean
 }
@@ -329,7 +332,7 @@ export class RaceController {
     const r = this.round
     if (!r) return []
     if (this.simulatingAis(r)) {
-      return r.ais.map((a) => ({ pos: a.bike.pos, heading: a.bike.heading, cp: a.cp, fin: a.fin }))
+      return r.ais.map((a) => ({ pos: a.bike.pos, heading: a.bike.heading, lean: a.bike.lean, cp: a.cp, fin: a.fin }))
     }
     const t = this.link.serverNow() - INTERP_DELAY
     return Array.from({ length: r.meta.ai }, (_, k) => this.aiSamples.get(String(k)))
@@ -504,7 +507,7 @@ export class RaceController {
       const a = synced[k]
       if (!a) return createAi(course, s)
       const pos = { x: a.x, z: a.z }
-      return { bike: { pos, heading: a.h, speed: a.s }, wp: a.w, cp: a.cp, anchor: pos, still: 0, fin: a.fin !== undefined }
+      return { bike: { ...restingBike({ pos, heading: a.h }), speed: a.s }, wp: a.w, cp: a.cp, anchor: pos, still: 0, fin: a.fin !== undefined }
     })
     return { ais, aiFin: synced.map((a) => a?.fin) }
   }
@@ -546,7 +549,8 @@ export class RaceController {
 
   private stepAis(state: GameState, dt: number, now: number): void {
     const r = this.round!
-    const self = this.active ? [{ pos: state.player.pos, fin: r.fin !== undefined }] : []
+    const bike = state.player.bike
+    const self = this.active ? [{ pos: state.player.pos, fin: r.fin !== undefined, heading: bike?.heading, speed: bike?.speed }] : []
     const humans = [...self, ...this.otherRacers()]
     const traffic = this.engine.trafficObstacles()
     let ais = r.ais
@@ -555,7 +559,7 @@ export class RaceController {
     while (clock >= AI_STEP) {
       clock -= AI_STEP
       ais = ais.map((ai, k) => {
-        const others = ais.filter((_, j) => j !== k).map((o) => ({ pos: o.bike.pos, fin: o.fin }))
+        const others = ais.filter((_, j) => j !== k).map((o) => ({ pos: o.bike.pos, fin: o.fin, heading: o.bike.heading, speed: o.bike.speed }))
         const next = stepAi(ai, r.drivers[k]!, r.course, AI_STEP, this.engine.city.colliders, [...riderCircles([...humans, ...others]), ...traffic])
         if (next.fin && aiFin[k] === undefined) aiFin[k] = now
         return next

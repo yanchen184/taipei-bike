@@ -162,6 +162,28 @@ test.describe('G2 倒數與騎行', () => {
   })
 })
 
+test.describe('B2 摔車', () => {
+  test('[B2-5] 摔車時 HUD 顯示「摔車了！」，倒地期間不能騎，2 秒後扶起提示消失', async ({ page }) => {
+    await startSolo(page)
+    await startRace(page, 0)
+    const speed = async () => (await snapshot(page)).player.bike!.speed
+    // 起步後放開 W、按住 D：滑到 2.5 m/s 以下還硬轉，0.8 秒就倒（放開時的速度看頁面取樣延遲，等久一點）
+    await page.keyboard.down('w')
+    await expect.poll(speed, { intervals: [20] }).toBeGreaterThan(1.8)
+    await page.keyboard.up('w')
+    await page.keyboard.down('d')
+    await expect(page.getByTestId('fallen')).toHaveText('摔車了！', { timeout: 8_000 })
+    await page.keyboard.up('d')
+    await page.keyboard.down('w')
+    const lying = (await snapshot(page)).player.pos
+    await page.waitForTimeout(500)
+    expect(distance((await snapshot(page)).player.pos, lying)).toBeLessThan(0.05)
+    await expect(page.getByTestId('fallen')).toHaveCount(0, { timeout: 2_500 })
+    await expect.poll(speed).toBeGreaterThan(0.5)
+    await page.keyboard.up('w')
+  })
+})
+
 /** 重生點在檢查點附近（依起跑格錯開），不一定剛好在中心 */
 const CHECKPOINT_SLACK = 8
 

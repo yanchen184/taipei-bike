@@ -27,21 +27,21 @@ export const SLOT_LABEL: Record<PartSlot, string> = { frame: '車架', wheel: '�
 export const STAT_LABEL: Record<keyof Stats, string> = { top: '極速', accel: '加速', corner: '過彎', brake: '煞車' }
 
 /** 沒有任何加成時的腳踏車 */
-export const BASE_STATS: Stats = { top: 12, accel: 3, corner: 6, brake: 10 }
+export const BASE_STATS: Stats = { top: 12, accel: 3, corner: 6, brake: 5 }
 
 /** 零件表（§12-5），每個部位第一款是最便宜、沒有加成的 */
 export const PARTS: readonly Part[] = [
   { id: 'steel', slot: 'frame', name: '鋼管', price: 100, effect: {} },
   { id: 'alloy', slot: 'frame', name: '鋁合金', price: 300, effect: { accel: 0.5, corner: 1 } },
-  { id: 'carbon', slot: 'frame', name: '碳纖', price: 500, effect: { top: 0.5, accel: 0.5, corner: 1 } },
+  { id: 'carbon', slot: 'frame', name: '碳纖', price: 500, effect: { top: 1, accel: 0.5, corner: 1 } },
   { id: 'commuter', slot: 'wheel', name: '通勤輪', price: 100, effect: {} },
-  { id: 'slick', slot: 'wheel', name: '公路細胎', price: 300, effect: { top: 1.5, corner: -3 } },
+  { id: 'slick', slot: 'wheel', name: '公路細胎', price: 300, effect: { top: 3, corner: -2 } },
   { id: 'grip', slot: 'wheel', name: '抓地寬胎', price: 300, effect: { corner: 3, brake: 3, top: -0.5 } },
   { id: 'single', slot: 'drive', name: '單速', price: 100, effect: {} },
-  { id: 'tall', slot: 'drive', name: '重齒比', price: 300, effect: { top: 1, accel: -1 } },
+  { id: 'tall', slot: 'drive', name: '重齒比', price: 300, effect: { top: 2, accel: -1 } },
   { id: 'short', slot: 'drive', name: '輕齒比', price: 300, effect: { accel: 1.5, top: -0.5 } },
   { id: 'flat', slot: 'bar', name: '平把', price: 100, effect: {} },
-  { id: 'drop', slot: 'bar', name: '公路彎把', price: 200, effect: { top: 0.5, corner: -1 } },
+  { id: 'drop', slot: 'bar', name: '公路彎把', price: 200, effect: { top: 1.5, corner: -1 } },
   { id: 'stem', slot: 'bar', name: '短龍頭', price: 200, effect: { corner: 3 } },
 ]
 

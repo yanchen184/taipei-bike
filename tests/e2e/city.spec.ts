@@ -19,14 +19,16 @@ test.describe('D5 相機與畫面', () => {
 
     await page.keyboard.down('w')
     await expect(page.getByTestId('speed')).not.toHaveText(/^0\s*km\/h$/)
-    await page.waitForTimeout(1500)
+    // 每幀的 dt 有上限，無頭瀏覽器掉幀時模擬時間會比實際時間慢，所以等到開出去而不是固定等幾秒
+    await expect
+      .poll(async () => {
+        const moved = await snapshot(page)
+        const dx = moved.player.car.pos.x - start.player.car.pos.x
+        const dz = moved.player.car.pos.z - start.player.car.pos.z
+        return dx * Math.sin(start.player.car.heading) + dz * Math.cos(start.player.car.heading)
+      }, { timeout: 8000 })
+      .toBeGreaterThan(3)
     await page.keyboard.up('w')
-
-    const moved = await snapshot(page)
-    const dx = moved.player.car.pos.x - start.player.car.pos.x
-    const dz = moved.player.car.pos.z - start.player.car.pos.z
-    const forward = dx * Math.sin(start.player.car.heading) + dz * Math.cos(start.player.car.heading)
-    expect(forward).toBeGreaterThan(3)
   })
 
   test('[D5-3] 按 H 播放喇叭聲', async ({ page }) => {

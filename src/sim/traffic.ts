@@ -191,7 +191,7 @@ export function writeVehiclePose(routes: Route[], v: Vehicle, out: Pose): void {
   out.heading = segmentAt(routes, v).heading
 }
 
-/** 把每台車的碰撞圓依序寫進 out（重用既有物件），回傳寫入數量 */
+/** 把每台車的碰撞圓與速度依序寫進 out（重用既有物件），回傳寫入數量 */
 export function writeVehicleCircles(routes: Route[], vehicles: readonly Vehicle[], out: Circle[]): number {
   let n = 0
   for (const v of vehicles) {
@@ -203,6 +203,9 @@ export function writeVehicleCircles(routes: Route[], vehicles: readonly Vehicle[
       circle.pos.x = seg.x + seg.dx * (u + along)
       circle.pos.z = seg.z + seg.dz * (u + along)
       circle.radius = spec.radius
+      const vel = (circle.vel ??= { x: 0, z: 0 })
+      vel.x = seg.dx * v.speed
+      vel.z = seg.dz * v.speed
       n++
     }
   }

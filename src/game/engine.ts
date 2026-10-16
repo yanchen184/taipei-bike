@@ -1,4 +1,5 @@
 import { formatClock, isNight } from '../sim/clock'
+import { isDown } from '../sim/bike'
 import { generateCity } from '../sim/city'
 import type { Circle } from '../sim/collide'
 import { canExitHome, doorPrompt, enterHome, exitHome, generateInterior, greeting, homeAt, type Interior } from '../sim/homes'
@@ -51,6 +52,8 @@ export interface HudSnapshot {
   night: boolean
   mode: PlayerState['mode']
   speedKmh: number
+  /** 騎車摔倒、還躺在地上 */
+  fallen: boolean
   prompt: string | null
   greeting: string | null
   placeLabel: string | null
@@ -343,6 +346,7 @@ export class GameEngine {
       night: isNight(s.t),
       mode: p.mode,
       speedKmh: Math.round(Math.abs((p.mode === 'bike' ? p.bike?.speed : p.car.speed) ?? 0) * 3.6),
+      fallen: p.mode === 'bike' && p.bike !== null && isDown(p.bike),
       prompt,
       greeting: greet,
       placeLabel: inside ? inside.home.address : null,

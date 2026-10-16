@@ -81,7 +81,8 @@ export function PlayerView() {
       bike.current.visible = !indoors && p.bike !== null
       if (p.bike) {
         bike.current.position.set(p.bike.pos.x, 0, p.bike.pos.z)
-        bike.current.rotation.y = p.bike.heading
+        // 轉彎往彎內傾、摔車倒在地上：沿車身前後軸滾轉
+        bike.current.rotation.set(0, p.bike.heading, p.bike.lean)
       }
     }
     if (rider.current) rider.current.visible = p.mode === 'bike'

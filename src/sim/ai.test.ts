@@ -1,14 +1,15 @@
 import { describe, expect, test } from 'vitest'
 import { AI_STEP, aiDriver, createAi, parkSlot, riderCircles, stepAi, type AiDriver, type AiRider } from './ai'
 import { aiBuild } from './balance'
+import { CRASH_SPEED, isDown } from './bike'
 import { ROAD_COUNT, ROAD_WIDTH, SIDEWALK, generateCity, roadCenter } from './city'
-import { isFree, type Circle } from './collide'
+import { isFree, rect, type Circle } from './collide'
 import { CHECKPOINT_RADIUS, checkpointPos, generateCourse, type Course } from './course'
 import { DEFAULT_BUILD } from './parts'
 import { RACE_LIMIT_MS } from './race'
 import { advanceTraffic, buildRoutes, initTraffic, writeVehicleCircles, type TrafficState } from './traffic'
 import { BIKE_SPEC } from './vehicle'
-import type { CityMap, Vec2 } from './types'
+import type { CityMap, Rect, Vec2 } from './types'
 
 const STEPS_PER_SECOND = Math.round(1 / AI_STEP)
 const ASPHALT_HALF = ROAD_WIDTH / 2 - SIDEWALK
@@ -114,25 +115,33 @@ describe('A1 AI 騎士', () => {
     }
   }, 120_000)
 
+  /** 讓 AI 留在起跑格附近 seconds 秒，回傳第一次移回第一個路口的時間 */
+  function respawnTime(city: CityMap, course: Course, seconds: number, colliders: Rect[], obstacles: Circle[]) {
+    let ai = createAi(course, 0)
+    const a = course.nodes[0]!
+    for (let step = 1; step <= seconds * STEPS_PER_SECOND; step++) {
+      ai = stepAi(ai, aiDriver(0, DEFAULT_BUILD), course, AI_STEP, [...city.colliders, ...colliders], obstacles)
+      if (ai.bike.pos.x === a.x && ai.bike.pos.z === a.z) return { ai, at: step * AI_STEP }
+    }
+    return { ai, at: null }
+  }
+
   test('[A1-3] AI 3 秒內移動不到 3 m 時移回最後經過的路口並朝向下一段', () => {
     const city = generateCity(3)
     const course = generateCourse(city, 1)
     const [a, b] = [course.nodes[0]!, course.nodes[1]!]
-    let ai = createAi(course, 0)
-    const slot = ai.bike.pos
-    /** 起跑格四周一圈彼此重疊的碰撞圓，AI 最多只能移動 0.1 m */
-    const ring: Circle[] = Array.from({ length: 8 }, (_, k) => ({
-      pos: { x: slot.x + 2 * Math.cos((k * Math.PI) / 4), z: slot.z + 2 * Math.sin((k * Math.PI) / 4) },
-      radius: 1.3,
-    }))
-    let respawnedAt: number | null = null
-    for (let step = 1; step <= 4 * STEPS_PER_SECOND && respawnedAt === null; step++) {
-      ai = stepAi(ai, aiDriver(0, DEFAULT_BUILD), course, AI_STEP, city.colliders, ring)
-      if (ai.bike.pos.x === a.x && ai.bike.pos.z === a.z) respawnedAt = step * AI_STEP
-    }
-    expect(respawnedAt).not.toBeNull()
-    expect(respawnedAt!).toBeGreaterThanOrEqual(3)
-    expect(respawnedAt!).toBeLessThan(3 + 2 * AI_STEP)
+    const slot = createAi(course, 0).bike.pos
+    /** 起跑格四周的牆，AI 最多只能移動 0.1 m，速度不到摔車的程度 */
+    const box = [
+      rect(slot.x - 3, slot.z - 3, slot.x - 0.7, slot.z + 3),
+      rect(slot.x + 0.7, slot.z - 3, slot.x + 3, slot.z + 3),
+      rect(slot.x - 3, slot.z - 3, slot.x + 3, slot.z - 0.7),
+      rect(slot.x - 3, slot.z + 0.7, slot.x + 3, slot.z + 3),
+    ]
+    const { ai, at } = respawnTime(city, course, 4, box, [])
+    expect(at).not.toBeNull()
+    expect(at!).toBeGreaterThanOrEqual(3)
+    expect(at!).toBeLessThan(3 + 2 * AI_STEP)
     expect(ai.bike.heading).toBeCloseTo(Math.atan2(b.x - a.x, b.z - a.z), 12)
     expect(ai.bike.speed).toBe(0)
     expect(ai.wp).toBe(1)
@@ -141,21 +150,57 @@ describe('A1 AI 騎士', () => {
     expect(Math.hypot(free.bike.pos.x - a.x, free.bike.pos.z - a.z)).toBeGreaterThan(30)
   })
 
-  test('[A1-5] AI 撞到選手或其他 AI 時被推開並反彈', () => {
+  test('[A1-3] 前方被車擋住停下等待時，等待的時間只算 1/10，最多等 30 秒才移回路口', () => {
+    const city = generateCity(3)
+    const course = generateCourse(city, 1)
+    const slot = createAi(course, 0).bike.pos
+    /** 起跑格四周一圈彼此重疊的碰撞圓，AI 最多只能移動 0.1 m */
+    const ring: Circle[] = Array.from({ length: 8 }, (_, k) => ({
+      pos: { x: slot.x + 2 * Math.cos((k * Math.PI) / 4), z: slot.z + 2 * Math.sin((k * Math.PI) / 4) },
+      radius: 1.3,
+    }))
+    const { at } = respawnTime(city, course, 31, [], ring)
+    expect(at).not.toBeNull()
+    expect(at!).toBeGreaterThanOrEqual(29)
+    expect(at!).toBeLessThanOrEqual(30 + 2 * AI_STEP)
+  })
+
+  test('[A1-5] AI 撞到選手或其他 AI 時被推開不重疊，撞擊速度超過 1 m/s 就摔車', () => {
     const city = generateCity(3)
     const course = generateCourse(city, 1)
     const start = createAi(course, 0)
     const { pos, heading } = start.bike
     const other: Circle = { pos: { x: pos.x + Math.sin(heading) * 2, z: pos.z + Math.cos(heading) * 2 }, radius: BIKE_SPEC.radius }
     let ai: AiRider = { ...start, bike: { ...start.bike, speed: 8 } }
-    let bounced = false
+    let fell = false
     for (let step = 0; step < STEPS_PER_SECOND; step++) {
       ai = stepAi(ai, aiDriver(0, DEFAULT_BUILD), course, AI_STEP, city.colliders, [other])
-      if (ai.bike.speed < 0) bounced = true
+      if (isDown(ai.bike)) fell = true
       const d = Math.hypot(ai.bike.pos.x - other.pos.x, ai.bike.pos.z - other.pos.z)
       expect(d).toBeGreaterThanOrEqual(2 * BIKE_SPEC.radius - 1e-9)
     }
-    expect(bounced).toBe(true)
+    expect(fell).toBe(true)
+  })
+
+  test('[A1-9] 前方整條路被擋住、換不了路線時，在撞上之前煞停，不摔車', () => {
+    const city = generateCity(3)
+    const course = generateCourse(city, 1)
+    const start = createAi(course, 0)
+    const { pos, heading } = start.bike
+    const fx = Math.sin(heading)
+    const fz = Math.cos(heading)
+    /** 前方 25 m 一整排停著的碰撞圓，橫跨兩條路線 */
+    const wall: Circle[] = Array.from({ length: 17 }, (_, k) => ({
+      pos: { x: pos.x + fx * 25 - fz * (k - 8), z: pos.z + fz * 25 + fx * (k - 8) },
+      radius: BIKE_SPEC.radius,
+    }))
+    let ai: AiRider = { ...start, bike: { ...start.bike, speed: 8 } }
+    for (let step = 0; step < 6 * STEPS_PER_SECOND; step++) {
+      ai = stepAi(ai, aiDriver(4, DEFAULT_BUILD), course, AI_STEP, city.colliders, wall)
+      expect(isDown(ai.bike)).toBe(false)
+      for (const c of wall) expect(Math.hypot(ai.bike.pos.x - c.pos.x, ai.bike.pos.z - c.pos.z)).toBeGreaterThan(c.radius + BIKE_SPEC.radius)
+    }
+    expect(Math.abs(ai.bike.speed)).toBeLessThan(CRASH_SPEED)
   })
 
   test('[A1-7] AI 騎在柏油路面上，被撞開時最多壓到路緣，不上人行道', () => {
