@@ -219,7 +219,8 @@ test.describe('B2 摔車（連線）', () => {
     await expect(page.getByTestId('fallen')).toBeVisible({ timeout: 8_000 })
     await page.keyboard.up('d')
     await expect.poll(async () => Math.abs((await roll()) ?? 0), { timeout: 3_000 }).toBeGreaterThan(1.4)
-    await expect(page.getByTestId('fallen')).toHaveCount(0, { timeout: 2_500 })
+    // 倒地 2 秒是遊戲時間；兩個 context 同時跑時畫面更新會變慢，從摔車到扶起的實際時間可能超過 2.5 秒
+    await expect(page.getByTestId('fallen')).toHaveCount(0, { timeout: 5_000 })
     await expect.poll(async () => Math.abs((await roll()) ?? 1), { timeout: 3_000 }).toBeLessThan(0.1)
   })
 })
