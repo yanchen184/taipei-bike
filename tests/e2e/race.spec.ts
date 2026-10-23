@@ -150,14 +150,23 @@ test.describe('G2 倒數與騎行', () => {
 
   test('[G2-5] 倒數時排在後一格的 AI 半透明，不擋住自己', async ({ page }) => {
     await startSolo(page)
-    await openWorkshop(page, 1)
-    await page.getByTestId('race-go').click()
-    await expect(page.getByTestId('race-countdown')).toBeVisible()
-    const r = await currentRace(page)
-    expect(r.slot).toBe(0)
-    // AI 在後一格，位於相機與自己之間；畫出第一幀後仍在畫面上，但半透明
+    // 起跑格隨機（§8-3）：抽到最後一格時後面沒有 AI，退出重開
+    let r: DebugRace | null = null
+    for (let k = 0; k < 6 && (r === null || r.slot === r.grid.length - 1); k++) {
+      if (r !== null) {
+        await page.getByTestId('race-quit').click()
+        await expect(page.getByTestId('race-start')).toBeVisible()
+      }
+      await openWorkshop(page, 5)
+      await page.getByTestId('race-go').click()
+      await expect(page.getByTestId('race-countdown')).toBeVisible()
+      r = await currentRace(page)
+    }
+    expect(r!.slot).toBeLessThan(r!.grid.length - 1)
+    // AI 依序排在玩家以外的格子；後一格的 AI 位於相機與自己之間，畫出第一幀後仍在畫面上，但半透明
+    const behind = `race-ai-${r!.grid.map((_, k) => k).filter((k) => k !== r!.slot).indexOf(r!.slot + 1)}`
     await expect
-      .poll(() => page.evaluate(() => window.__taipei!.shown('race-ai-0') !== null && window.__taipei!.opacity('race-ai-0')! < 0.7), { timeout: 2_500 })
+      .poll(() => page.evaluate((id) => window.__taipei!.shown(id) !== null && window.__taipei!.opacity(id)! < 0.7, behind), { timeout: 2_500 })
       .toBe(true)
   })
 })
@@ -175,9 +184,11 @@ test.describe('B2 摔車', () => {
     await expect(page.getByTestId('fallen')).toHaveText('摔車了！', { timeout: 8_000 })
     await page.keyboard.up('d')
     await page.keyboard.down('w')
-    const lying = (await snapshot(page)).player.pos
-    await page.waitForTimeout(500)
-    expect(distance((await snapshot(page)).player.pos, lying)).toBeLessThan(0.05)
+    // 每次 snapshot 要等一幀，只比較仍在倒地（down > 0）時取到的位置
+    const lying: { x: number; z: number }[] = []
+    for (let p = (await snapshot(page)).player; p.bike!.down > 0; p = (await snapshot(page)).player) lying.push(p.pos)
+    expect(lying.length).toBeGreaterThanOrEqual(2)
+    for (const pos of lying) expect(distance(pos, lying[0]!)).toBeLessThan(0.05)
     await expect(page.getByTestId('fallen')).toHaveCount(0, { timeout: 2_500 })
     await expect.poll(speed).toBeGreaterThan(0.5)
     await page.keyboard.up('w')
@@ -457,5 +468,16 @@ test.describe('W3 成績表組裝', () => {
     await expect(builds).toHaveCount(2)
     await expect(builds.nth(0)).toHaveText('碳纖＋通勤輪＋輕齒比＋平把')
     await expect(builds.nth(1)).toHaveText(/^[^＋]+(＋[^＋]+){3}$/)
+  })
+})
+
+test.describe('B4 破風與後追', () => {
+  test('[B4-5] 停在起跑格讓 AI 騎遠，HUD 顯示後追加成', async ({ page }) => {
+    await startSolo(page)
+    await startRace(page, 5)
+    await expect(page.getByTestId('race-catchup')).toBeHidden()
+    await expect(page.getByTestId('race-catchup')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId('race-catchup')).toHaveText(/^後追 \d+0%$/)
+    await page.screenshot({ path: 'test-results/b4-5-catchup.png' })
   })
 })

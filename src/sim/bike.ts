@@ -1,3 +1,4 @@
+import { NO_AID, aidedSpec, type Aid } from './aid'
 import type { Circle } from './collide'
 import { FULL_STAMINA, stepStamina, type Stamina } from './stamina'
 import type { Pose, Rect } from './types'
@@ -54,22 +55,24 @@ function pedaling(b: BikeState, input: DriveInput): boolean {
   return input.forward > 0 && b.speed >= 0 && !b.stamina.spent
 }
 
-/** 推進一個子步：倒地時不能操作，只被推出重疊的物體；撞擊或晃太久就摔車 */
+/** 推進一個子步：倒地時不能操作，只被推出重疊的物體；撞擊或晃太久就摔車；aid 是破風、後追的加成 */
 export function moveBike(
   b: BikeState,
-  spec: VehicleSpec,
+  base: VehicleSpec,
   input: DriveInput,
   dt: number,
   colliders: readonly Rect[],
   obstacles: readonly Circle[],
+  aid: Aid = NO_AID,
 ): BikeState {
+  const spec = aidedSpec(base, aid)
   if (isDown(b)) {
     const { state } = advanceVehicle({ ...b, speed: 0 }, spec, IDLE, dt, colliders, obstacles)
     const down = Math.max(0, b.down - dt)
     return { ...state, speed: 0, down, wobble: 0, lean: down > 0 ? b.lean : 0, stamina: stepStamina(b.stamina, false, dt) }
   }
   const pedal = pedaling(b, input)
-  const stamina = stepStamina(b.stamina, pedal, dt)
+  const stamina = stepStamina(b.stamina, pedal, dt, aid.drain)
   const drive = input.forward > 0 && !pedal && b.speed >= 0 ? { ...input, forward: 0 } : input
   const { state, impact, yawRate } = advanceVehicle(b, spec, drive, dt, colliders, obstacles)
   const lean = Math.max(-MAX_LEAN, Math.min(MAX_LEAN, Math.atan((Math.max(0, state.speed) * yawRate) / GRAVITY)))
@@ -87,9 +90,10 @@ export function stepBike(
   dt: number,
   colliders: readonly Rect[],
   obstacles: readonly Circle[],
+  aid: Aid = NO_AID,
 ): BikeState {
-  const count = substeps(spec.maxSpeed, dt)
+  const count = substeps(spec.maxSpeed * aid.speed, dt)
   let s = b
-  for (let k = 0; k < count; k++) s = moveBike(s, spec, input, dt / count, colliders, obstacles)
+  for (let k = 0; k < count; k++) s = moveBike(s, spec, input, dt / count, colliders, obstacles, aid)
   return s
 }

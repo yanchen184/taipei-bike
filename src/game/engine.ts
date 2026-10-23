@@ -1,4 +1,5 @@
 import { formatClock, isNight } from '../sim/clock'
+import { NO_AID, type Aid } from '../sim/aid'
 import { isDown } from '../sim/bike'
 import { generateCity } from '../sim/city'
 import type { Circle } from '../sim/collide'
@@ -79,6 +80,8 @@ export interface EngineHooks {
   /** 回傳 true 表示已處理，引擎不再處理 */
   action?(action: Action): boolean
   afterStep?(state: GameState, dt: number): void
+  /** 騎車時的破風、後追加成 */
+  aid?(): Aid
 }
 
 export interface Storage {
@@ -176,7 +179,8 @@ export class GameEngine {
     const obstacles = extra.length === 0 ? npc : [...npc, ...extra]
     const controlled = hooks?.controls?.() ?? true
     const full: PlayerInput = { ...(controlled ? input : NO_INPUT), cameraYaw: this.current.cameraYaw }
-    const player = stepPlayer(before, full, dt, map, obstacles)
+    const aid = riding ? (hooks?.aid?.() ?? NO_AID) : NO_AID
+    const player = stepPlayer(before, full, dt, map, obstacles, aid)
 
     const save = { ...this.current.save, odometer: player.odometer }
     this.current = { ...this.current, t, traffic, player, cameraYaw: this.followYaw(player, dt), save }

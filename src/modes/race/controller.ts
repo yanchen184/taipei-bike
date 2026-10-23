@@ -1,4 +1,5 @@
 import type { Action, EngineHooks, GameEngine, GameState } from '../../game/engine'
+import { NO_AID, catchupStrength, draftStrength, makeAid, routeProgress, type Aid } from '../../sim/aid'
 import { AI_STEP, aiDriver, createAi, riderCircles, stepAi, type AiDriver, type AiRider } from '../../sim/ai'
 import { restingBike } from '../../sim/bike'
 import { aiBuild } from '../../sim/balance'
@@ -30,6 +31,8 @@ export const AI_SEND_MS = 100
 const CLOCK_STEP = 100
 /** 路口提示距離的精度（公尺） */
 const TURN_STEP = 10
+/** HUD 破風、後追強度的精度（百分比） */
+const AID_STEP = 10
 /** 比賽中引擎不處理的按鍵：R 改成回檢查點，E、Q、B 不能下車、叫車或召喚腳踏車 */
 const BLOCKED_ACTIONS: readonly Action[] = ['interact', 'callCar', 'summonBike']
 
@@ -68,6 +71,9 @@ export interface RaceView {
   turn: TurnKind | null
   /** 到下一個路口的距離，以 TURN_STEP 為單位 */
   turnDist: number
+  /** 自己目前的破風、後追強度（0–100，以 AID_STEP 為單位） */
+  draft: number
+  catchup: number
 }
 
 export interface AiPose {
@@ -136,6 +142,8 @@ const IDLE_VIEW: RaceView = {
   results: null,
   turn: null,
   turnDist: 0,
+  draft: 0,
+  catchup: 0,
 }
 
 function viewEqual(a: RaceView, b: RaceView): boolean {
@@ -199,6 +207,7 @@ export class RaceController {
     controls: () => this.canRide(),
     action: (action) => this.handleAction(action),
     afterStep: (state, dt) => this.afterStep(state, dt),
+    aid: () => this.selfAid(),
   }
 
   /** 不在競速模式時仍要推進：房主繼續算 AI、上傳進度、接手 AI；不參賽的人成為房主時也靠它推進 AI */
@@ -548,11 +557,37 @@ export class RaceController {
       })
   }
 
+  /** 自己騎車時的破風、後追加成；只在比賽進行中、還沒完成時有效 */
+  private selfAid(): Aid {
+    const r = this.round
+    const bike = this.engine.state.player.bike
+    if (!r || r.slot === null || !bike || !this.canRide()) return NO_AID
+    const others = [...this.aiRiders(), ...this.otherRacers()].filter((o) => !o.fin).map((o) => o.pos)
+    const gap = this.leaderProgress(r) - routeProgress(r.course, r.cp, bike.pos)
+    return makeAid(draftStrength(bike, others), catchupStrength(gap))
+  }
+
+  /** 仍在房內的參賽者中，沿路線騎最遠的距離（已完成的算全長） */
+  private leaderProgress(r: Round): number {
+    const self = r.slot !== null && this.active ? [routeProgress(r.course, r.cp, this.engine.state.player.pos)] : []
+    const humans = this.presentEntrants(r)
+      .filter((id) => id !== this.link.selfId)
+      .flatMap((id) => {
+        const theirs = this.theirProgress(r, id)
+        const cp = theirs?.fin !== undefined ? r.course.checkpoints.length : (theirs?.cp ?? 0)
+        const pos = this.options.positionOf?.(id) ?? null
+        return pos ? [routeProgress(r.course, cp, pos)] : []
+      })
+    const ais = this.aiRiders().map((a) => routeProgress(r.course, a.cp, a.pos))
+    return Math.max(0, ...self, ...humans, ...ais)
+  }
+
   private stepAis(state: GameState, dt: number, now: number): void {
     const r = this.round!
     const bike = state.player.bike
     const self = this.active ? [{ pos: state.player.pos, fin: r.fin !== undefined, heading: bike?.heading, speed: bike?.speed }] : []
     const humans = [...self, ...this.otherRacers()]
+    const leader = this.leaderProgress(r)
     const traffic = this.engine.trafficObstacles()
     let ais = r.ais
     const aiFin = [...r.aiFin]
@@ -561,7 +596,10 @@ export class RaceController {
       clock -= AI_STEP
       ais = ais.map((ai, k) => {
         const others = ais.filter((_, j) => j !== k).map((o) => ({ pos: o.bike.pos, fin: o.fin, heading: o.bike.heading, speed: o.bike.speed }))
-        const next = stepAi(ai, r.drivers[k]!, r.course, AI_STEP, this.engine.city.colliders, [...riderCircles([...humans, ...others]), ...traffic])
+        const ahead = [...humans, ...others].filter((o) => !o.fin).map((o) => o.pos)
+        const aid = ai.fin ? NO_AID : makeAid(draftStrength(ai.bike, ahead), catchupStrength(leader - routeProgress(r.course, ai.cp, ai.bike.pos)))
+        const riders = riderCircles([...humans, ...others])
+        const next = stepAi(ai, r.drivers[k]!, r.course, AI_STEP, this.engine.city.colliders, [...riders, ...traffic], aid, riders)
         if (next.fin && aiFin[k] === undefined) aiFin[k] = now
         return next
       })
@@ -700,7 +738,14 @@ export class RaceController {
           : null,
       turn: turn?.kind ?? null,
       turnDist: turn ? Math.round(turn.dist / TURN_STEP) * TURN_STEP : 0,
+      ...this.aidView(),
     }
+  }
+
+  private aidView(): { draft: number; catchup: number } {
+    const aid = this.selfAid()
+    const pct = (v: number): number => Math.round((v * 100) / AID_STEP) * AID_STEP
+    return { draft: pct(aid.draft), catchup: pct(aid.catchup) }
   }
 
   private report(error: unknown): void {

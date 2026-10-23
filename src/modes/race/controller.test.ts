@@ -13,6 +13,8 @@ import { EMPTY_RACE, localRaceLink, type RaceEntrant, type RaceLink, type RaceSn
 const DT = 1 / 30
 const IDLE = { forward: 0, right: 0, run: false, handbrake: false }
 const PEDAL = { ...IDLE, forward: 1 }
+/** drawGrid 用這個亂數時不交換，玩家照順序排在最前面 */
+const KEEP_ORDER = () => 0.999
 
 function memoryStorage(): Storage {
   const data = new Map<string, string>()
@@ -21,7 +23,7 @@ function memoryStorage(): Storage {
 
 /** 單人的連結，開局後立刻按「出發」，不經過整備 */
 function quickLink(now: () => number): RaceLink {
-  const base = localRaceLink('me', '阿明', now)
+  const base = localRaceLink('me', '阿明', now, KEEP_ORDER)
   return {
     ...base,
     async start(ai, cpsOf) {
@@ -214,7 +216,7 @@ function twoRiders(timed = false) {
 }
 
 describe('W1 整備站', () => {
-  const solo = () => setup((now) => localRaceLink('me', '阿明', now))
+  const solo = () => setup((now) => localRaceLink('me', '阿明', now, KEEP_ORDER))
 
   test('[W1-3] 單人開賽後先整備，沒有時間限制，按「出發」才進入 3 秒倒數', async () => {
     const { controller, ride, player } = solo()

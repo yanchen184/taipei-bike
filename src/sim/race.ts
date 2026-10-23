@@ -107,6 +107,18 @@ export function racePhase(meta: RaceMeta, standings: readonly Standing[], firstF
   return raceOver(meta, standings, firstFin, now) ? 'over' : 'racing'
 }
 
+/** 起跑格隨機分配：ids 加 ai 台 AI 共用前面的格子，玩家抽到哪格就排哪格，剩下的格子給 AI */
+export function drawGrid(ids: readonly string[], ai: number, rand: () => number = Math.random): Record<string, number> {
+  const slots = Array.from({ length: ids.length + ai }, (_, k) => k)
+  for (let i = slots.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1))
+    const picked = slots[j]!
+    slots[j] = slots[i]!
+    slots[i] = picked
+  }
+  return Object.fromEntries(ids.map((id, k) => [id, slots[k]!]))
+}
+
 /** 房內有 humans 位玩家時，最多能加幾台 AI */
 export function aiLimit(humans: number): number {
   return Math.max(0, Math.min(MAX_AI, MAX_RACERS - humans))

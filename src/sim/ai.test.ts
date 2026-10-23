@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
-import { AI_STEP, AI_STYLES, aiDriver, createAi, parkSlot, riderCircles, stepAi, type AiDriver, type AiRider } from './ai'
+import { AI_STEP, AI_STYLES, aiDriver, cruiseSpeed, createAi, parkSlot, riderCircles, stepAi, type AiDriver, type AiRider } from './ai'
+import { DRAFT_RANGE, draftStrength, makeAid } from './aid'
 import { aiBuild } from './balance'
 import { CRASH_SPEED, isDown } from './bike'
 import { ROAD_COUNT, ROAD_WIDTH, SIDEWALK, generateCity, roadCenter } from './city'
@@ -259,4 +260,50 @@ describe('A3 AI 體力配速', () => {
       }
     }
   }, 120_000)
+})
+
+describe('A4 AI 跟車', () => {
+  /** 第一段直線上，前方 4 m 有一台以 ratio × 自己直線速度直騎的選手；回傳每一步的前後距離、破風強度與最後的體力 */
+  function chase(k: number, ratio: number) {
+    const city = generateCity(3)
+    const course = generateCourse(city, 1)
+    const driver = aiDriver(k, DEFAULT_BUILD)
+    const start = createAi(course, 0)
+    const { pos, heading } = start.bike
+    const fx = Math.sin(heading)
+    const fz = Math.cos(heading)
+    const v = cruiseSpeed(driver.spec, driver.style) * ratio
+    const leg = Math.hypot(course.nodes[1]!.x - pos.x, course.nodes[1]!.z - pos.z)
+    let ai: AiRider = { ...start, bike: { ...start.bike, speed: v } }
+    let lead = { x: pos.x + fx * 4, z: pos.z + fz * 4 }
+    const gaps: number[] = []
+    const drafts: number[] = []
+    // 前車騎到離路口 15 m 為止，之後路線會轉彎
+    for (let step = 0; step < ((leg - 21) / v) * STEPS_PER_SECOND; step++) {
+      lead = { x: lead.x + fx * v * AI_STEP, z: lead.z + fz * v * AI_STEP }
+      const rider: Circle = { pos: lead, radius: BIKE_SPEC.radius, vel: { x: fx * v, z: fz * v } }
+      const draft = draftStrength(ai.bike, [lead])
+      ai = stepAi(ai, driver, course, AI_STEP, city.colliders, [rider], makeAid(draft, 0), [rider])
+      gaps.push((lead.x - ai.bike.pos.x) * fx + (lead.z - ai.bike.pos.z) * fz)
+      drafts.push(draft)
+    }
+    return { gaps, drafts, ai }
+  }
+
+  test('[A4-1] AI 3 到 AI 5 跟在夠快的前車正後方吃破風，衝刺前不超車、不撞上', () => {
+    for (const k of [2, 3, 4]) {
+      const { gaps, drafts, ai } = chase(k, 0.85)
+      expect(gaps.length, `AI ${k + 1}`).toBeGreaterThan(2 * STEPS_PER_SECOND)
+      expect(Math.min(...gaps), `AI ${k + 1}`).toBeGreaterThan(2 * BIKE_SPEC.radius)
+      expect(Math.max(...gaps), `AI ${k + 1}`).toBeLessThan(DRAFT_RANGE)
+      expect(drafts.at(-1), `AI ${k + 1}`).toBeGreaterThan(0.9)
+      expect(isDown(ai.bike), `AI ${k + 1}`).toBe(false)
+    }
+  })
+
+  test('[A4-2] AI 1、AI 2 不刻意跟車，前車比自己慢就超過去；前車太慢時 AI 5 也超車', () => {
+    // 換到另一條路線並排或超前：前後距離小於兩台車相碰的距離（同一條路線上會撞）
+    for (const k of [0, 1]) expect(Math.min(...chase(k, 0.8).gaps), `AI ${k + 1}`).toBeLessThan(2 * BIKE_SPEC.radius)
+    expect(Math.min(...chase(4, 0.6).gaps)).toBeLessThan(0)
+  })
 })

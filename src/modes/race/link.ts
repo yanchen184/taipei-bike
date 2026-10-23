@@ -1,5 +1,5 @@
 import type { OnlineSession } from '../../game/online'
-import type { AiNet, BuildNet, Progress, RaceMeta } from '../../sim/race'
+import { drawGrid, type AiNet, type BuildNet, type Progress, type RaceMeta } from '../../sim/race'
 
 /** race 節點的內容；meta 為 null 表示還沒有比賽 */
 export interface RaceSnapshot {
@@ -39,7 +39,7 @@ export interface RaceLink {
 
 export const EMPTY_RACE: RaceSnapshot = { meta: null, progress: {}, ai: {}, build: {} }
 
-/** 連線用：房主是最早加入的玩家，起跑格依加入先後；讀寫錯誤顯示在房間面板 */
+/** 連線用：房主是最早加入的玩家，起跑格由房主開局時隨機抽；讀寫錯誤顯示在房間面板 */
 export function onlineRaceLink(session: OnlineSession): RaceLink {
   const { link, store } = session
   const roster = () => store.getRoster().map((e) => ({ id: e.uid, name: e.name }))
@@ -50,7 +50,7 @@ export function onlineRaceLink(session: OnlineSession): RaceLink {
     roster,
     subscribeRoster: store.subscribe,
     watch: (onChange) => link.race.watch(onChange, (error) => store.setError(error.message)),
-    start: (ai, cpsOf) => link.race.start(ai, cpsOf, Object.fromEntries(roster().map((e, k) => [e.id, k]))),
+    start: (ai, cpsOf) => link.race.start(ai, cpsOf, drawGrid(roster().map((e) => e.id), ai)),
     sendProgress: (p) => link.race.sendProgress(p),
     sendAi: (ai) => link.race.sendAi(ai),
     sendBuild: (build) => link.race.sendBuild(build),
@@ -58,8 +58,8 @@ export function onlineRaceLink(session: OnlineSession): RaceLink {
   }
 }
 
-/** 單人用：資料放記憶體，自己就是房主；整備沒有時間限制，按「出發」才開始倒數 */
-export function localRaceLink(selfId: string, name: string, now: () => number = Date.now): RaceLink {
+/** 單人用：資料放記憶體，自己就是房主；整備沒有時間限制，按「出發」才開始倒數；起跑格跟 AI 一起隨機抽 */
+export function localRaceLink(selfId: string, name: string, now: () => number = Date.now, rand: () => number = Math.random): RaceLink {
   let snap = EMPTY_RACE
   const listeners = new Set<(snap: RaceSnapshot) => void>()
   const publish = (next: RaceSnapshot) => {
@@ -79,7 +79,7 @@ export function localRaceLink(selfId: string, name: string, now: () => number = 
     },
     async start(ai, cpsOf) {
       const n = (snap.meta?.n ?? 0) + 1
-      const meta: RaceMeta = { n, ai, cps: cpsOf(n), at: now(), entrants: { [selfId]: 0 }, ready: null }
+      const meta: RaceMeta = { n, ai, cps: cpsOf(n), at: now(), entrants: drawGrid([selfId], ai, rand), ready: null }
       publish({ meta, progress: {}, ai: {}, build: {} })
     },
     async sendProgress(p) {

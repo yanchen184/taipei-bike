@@ -1,6 +1,7 @@
 import { CAR_LANE_OFFSET, ROAD_WIDTH, SIDEWALK, nearestRoadPose } from './city'
 import { isFree, resolveCircle, type Circle } from './collide'
 import type { CityMap, Pose, Vec2 } from './types'
+import { NO_AID, type Aid } from './aid'
 import { moveBike, restingBike, type BikeState } from './bike'
 import { BIKE_SPEC, CAR_SPEC, moveVehicle, substeps, type VehicleSpec, type VehicleState } from './vehicle'
 
@@ -87,31 +88,32 @@ function stepDrive(state: PlayerState, input: PlayerInput, dt: number, city: Cit
   return { ...state, pos: car.pos, heading: car.heading, car, odometer: state.odometer + distance(state.car.pos, car.pos) }
 }
 
-function stepBike(state: PlayerState, input: PlayerInput, dt: number, city: CityMap, obstacles: readonly Circle[]): PlayerState {
+function stepBike(state: PlayerState, input: PlayerInput, dt: number, city: CityMap, obstacles: readonly Circle[], aid: Aid): PlayerState {
   if (!state.bike) return state
-  const bike = moveBike(state.bike, state.bikeSpec, { ...input, handbrake: false }, dt, city.colliders, obstacles)
+  const bike = moveBike(state.bike, state.bikeSpec, { ...input, handbrake: false }, dt, city.colliders, obstacles, aid)
   return { ...state, pos: bike.pos, heading: bike.heading, bike }
 }
 
-function modeMaxSpeed(state: PlayerState): number {
+function modeMaxSpeed(state: PlayerState, aid: Aid): number {
   if (state.mode === 'drive') return CAR_SPEC.maxSpeed
-  return state.mode === 'bike' ? state.bikeSpec.maxSpeed : RUN_SPEED
+  return state.mode === 'bike' ? state.bikeSpec.maxSpeed * aid.speed : RUN_SPEED
 }
 
-/** 推進 dt 秒，依最大位移切成子步；室內時 colliders 由呼叫端換成室內的 */
+/** 推進 dt 秒，依最大位移切成子步；室內時 colliders 由呼叫端換成室內的；aid 只對腳踏車有效 */
 export function stepPlayer(
   state: PlayerState,
   input: PlayerInput,
   dt: number,
   city: CityMap,
   obstacles: readonly Circle[] = [],
+  aid: Aid = NO_AID,
 ): PlayerState {
-  const count = substeps(modeMaxSpeed(state), dt)
+  const count = substeps(modeMaxSpeed(state, aid), dt)
   const sub = dt / count
   let s = state
   for (let k = 0; k < count; k++) {
     if (s.mode === 'drive') s = stepDrive(s, input, sub, city, obstacles)
-    else if (s.mode === 'bike') s = stepBike(s, input, sub, city, obstacles)
+    else if (s.mode === 'bike') s = stepBike(s, input, sub, city, obstacles, aid)
     else s = stepWalk(s, input, sub, city.colliders)
   }
   return s

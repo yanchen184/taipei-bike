@@ -81,6 +81,20 @@ export function RaceHud({ controller }: { controller: RaceController }) {
             </span>
           </div>
         )}
+        {(v.draft > 0 || v.catchup > 0) && (
+          <div className="flex gap-2 text-sm font-bold text-white">
+            {v.draft > 0 && (
+              <span data-testid="race-draft" className="rounded-lg bg-sky-600/80 px-3 py-1">
+                破風 {v.draft}%
+              </span>
+            )}
+            {v.catchup > 0 && (
+              <span data-testid="race-catchup" className="rounded-lg bg-orange-600/80 px-3 py-1">
+                後追 {v.catchup}%
+              </span>
+            )}
+          </div>
+        )}
       </div>
       <RaceMinimap controller={controller} />
       {v.phase === 'countdown' && (

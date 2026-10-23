@@ -4,6 +4,7 @@ import { CHECKPOINT_RADIUS, advanceCheckpoint, checkpointPos, nodePose, type Cou
 import { MAX_AI } from './race'
 import { bikeSpec, type Build } from './parts'
 import type { Rect, Vec2 } from './types'
+import { DRAFT_MIN_SPEED, DRAFT_RANGE, DRAFT_WIDTH, NO_AID, aidedSpec, type Aid } from './aid'
 import { BALANCE_SPEED, FEET_DOWN_SPEED, WOBBLE_STEER, isDown, restingBike, stepBike, type BikeState } from './bike'
 import { type Stamina, drainRate, regenRate } from './stamina'
 import { BIKE_SPEC, stepVehicle, type DriveInput, type VehicleSpec } from './vehicle'
@@ -51,6 +52,12 @@ const PARK_SPEED = 5
 const PARK_ARRIVE = 0.4
 /** 最後衝刺時體力低於這個值就退回直線速度，不在終點前耗盡 */
 const SPRINT_RESERVE = 0.1
+/** 跟車（§10-6）：跟在前車後方這個距離，破風全滿 */
+const FOLLOW_GAP = 2.5
+/** 前車比這個距離近或遠多少公尺，目標速度就比前車快或慢 FOLLOW_GAIN 倍 */
+const FOLLOW_GAIN = 0.8
+/** 前車速度低於自己直線速度的這個比例時不跟，換路線超過去 */
+const FOLLOW_MIN = 0.75
 
 export interface AiRider {
   bike: BikeState
@@ -68,7 +75,8 @@ export interface AiRider {
 /**
  * 騎法（§10-2）：直線踩到極速的幾成、過彎半徑、彎前用幾成煞車力減速、提早幾公尺開始減速；
  * 體力（§10-4）：push = 不懂配速，直線上一直按著踩衝極速；其他人到了直線速度就放開滑行，
- * 加速時體力低於 reserve 就只在消耗不超過恢復時才踩，離終點 kick 公尺內按著踩衝極速、只留最後一點體力
+ * 加速時體力低於 reserve 就只在消耗不超過恢復時才踩，離終點 kick 公尺內按著踩衝極速、只留最後一點體力；
+ * 跟車（§10-6）：draft = 會刻意跟在前車後面吃破風，衝刺前不超車
  */
 export interface AiStyle {
   pedal: number
@@ -78,15 +86,16 @@ export interface AiStyle {
   push: boolean
   reserve: number
   kick: number
+  draft: boolean
 }
 
 /** AI 1（k = 0）最弱：AI 1、2 不懂配速，一路衝到沒力；AI 3–5 留著體力，最後衝刺 */
 export const AI_STYLES: readonly AiStyle[] = [
-  { pedal: 0.92, radius: 5, brake: 0.7, margin: 4, push: true, reserve: 0, kick: 0 },
-  { pedal: 0.94, radius: 5.5, brake: 0.75, margin: 3, push: false, reserve: 0, kick: 0 },
-  { pedal: 0.96, radius: 5.5, brake: 0.8, margin: 2, push: false, reserve: 0.2, kick: 60 },
-  { pedal: 0.98, radius: 6, brake: 0.85, margin: 1.5, push: false, reserve: 0.3, kick: 90 },
-  { pedal: 1, radius: 6.5, brake: 0.9, margin: 1, push: false, reserve: 0.35, kick: 120 },
+  { pedal: 0.92, radius: 5, brake: 0.7, margin: 4, push: true, reserve: 0, kick: 0, draft: false },
+  { pedal: 0.94, radius: 5.5, brake: 0.75, margin: 3, push: false, reserve: 0, kick: 0, draft: false },
+  { pedal: 0.96, radius: 5.5, brake: 0.8, margin: 2, push: false, reserve: 0.2, kick: 60, draft: true },
+  { pedal: 0.98, radius: 6, brake: 0.85, margin: 1.5, push: false, reserve: 0.3, kick: 90, draft: true },
+  { pedal: 1, radius: 6.5, brake: 0.9, margin: 1, push: false, reserve: 0.35, kick: 120, draft: true },
 ]
 
 /** 一台 AI 的編號（決定停車位與騎法）與組裝出來的腳踏車 */
@@ -217,6 +226,38 @@ function laneFor(course: Course, wp: number, l: Leg, along: number, colliders: r
   if (isCheckpointNode(course, wp - 1) && along < CHECKPOINT_EXIT) return chooseLane(l, along, CHECKPOINT_EXIT_LANES, colliders, obstacles)
   const exiting = wp >= 2 && isTurn(course, wp - 1) && along < TURN_EXIT
   return chooseLane(l, along, exiting ? TURN_EXIT_LANES : LANES, colliders, obstacles)
+}
+
+/** 跟車時沿前車的橫向位置騎，限制在柏油路的路線範圍內；檢查點路口前照常改走路中線 */
+function pickLane(course: Course, wp: number, l: Leg, along: number, colliders: readonly Rect[], obstacles: readonly Circle[], follow: Circle | null): number {
+  if (!follow || (isCheckpointNode(course, wp) && l.length - along < CHECKPOINT_APPROACH)) return laneFor(course, wp, l, along, colliders, obstacles)
+  const offset = (follow.pos.x - l.from.x) * l.right.x + (follow.pos.z - l.from.z) * l.right.z
+  return Math.min(Math.max(offset, 0), LANES[1]!)
+}
+
+/** 要跟的前車：車頭前方破風範圍內、正在騎、速度至少 minSpeed 的選手中最近的那位 */
+function followTarget(bike: BikeState, riders: readonly Circle[], minSpeed: number): Circle | null {
+  if (bike.speed < DRAFT_MIN_SPEED) return null
+  const fx = Math.sin(bike.heading)
+  const fz = Math.cos(bike.heading)
+  let best: Circle | null = null
+  let bestAhead = Infinity
+  for (const c of riders) {
+    if (!c.vel || Math.hypot(c.vel.x, c.vel.z) < minSpeed) continue
+    const dx = c.pos.x - bike.pos.x
+    const dz = c.pos.z - bike.pos.z
+    const ahead = dx * fx + dz * fz
+    if (ahead <= 0 || ahead > DRAFT_RANGE || Math.abs(dx * fz - dz * fx) > DRAFT_WIDTH || ahead >= bestAhead) continue
+    best = c
+    bestAhead = ahead
+  }
+  return best
+}
+
+/** 跟車的目標速度：比 FOLLOW_GAP 遠就比前車快一點追上，近就慢一點 */
+function followSpeed(bike: BikeState, follow: Circle): number {
+  const ahead = (follow.pos.x - bike.pos.x) * Math.sin(bike.heading) + (follow.pos.z - bike.pos.z) * Math.cos(bike.heading)
+  return Math.max(0, Math.hypot(follow.vel!.x, follow.vel!.z) + FOLLOW_GAIN * (ahead - FOLLOW_GAP))
 }
 
 /** 這一段結束時走的路線：終點是檢查點時為路中線 */
@@ -369,7 +410,10 @@ function park(ai: AiRider, driver: AiDriver, course: Course, dt: number, collide
   return { ...ai, bike: { ...ai.bike, ...stepVehicle(ai.bike, driver.spec, input, dt, colliders, []), down: 0, wobble: 0, lean: 0 } }
 }
 
-/** 推進 dt 秒（固定用 AI_STEP），用 driver 的組裝與騎法；obstacles 是其他選手、其他 AI 與 NPC 車 */
+/**
+ * 推進 dt 秒（固定用 AI_STEP），用 driver 的組裝與騎法；obstacles 是其他選手、其他 AI 與 NPC 車；aid 是破風、後追的加成；
+ * riders 是 obstacles 中的其他選手與 AI，會跟車的 AI 從中挑前車跟
+ */
 export function stepAi(
   ai: AiRider,
   driver: AiDriver,
@@ -377,6 +421,8 @@ export function stepAi(
   dt: number,
   colliders: readonly Rect[],
   obstacles: readonly Circle[],
+  aid: Aid = NO_AID,
+  riders: readonly Circle[] = [],
 ): AiRider {
   if (ai.fin) return park(ai, driver, course, dt, colliders)
   const { spec, style } = driver
@@ -388,7 +434,9 @@ export function stepAi(
   let wp = ai.wp
   let l = leg(course, wp)
   let along = alongOf(l, ai.bike.pos)
-  let lane = laneFor(course, wp, l, along, colliders, obstacles)
+  const sprint = sprinting(ai, style, course)
+  const follow = style.draft && !sprint ? followTarget(ai.bike, riders, cruiseSpeed(spec, style) * FOLLOW_MIN) : null
+  let lane = pickLane(course, wp, l, along, colliders, obstacles, follow)
   // 離轉彎點一個過彎半徑時切到下一段，弧線才會剛好接上下一段；太晚切會甩出路外（城市邊緣直接撞牆）。
   // 轉彎點用車子現在的橫向位置算：換車道換到一半就轉，照目標車道算會提早轉、切過路口的人行道
   const offset = Math.min(Math.max((ai.bike.pos.x - l.from.x) * l.right.x + (ai.bike.pos.z - l.from.z) * l.right.z, 0), endLane(course, wp, lane))
@@ -396,7 +444,7 @@ export function stepAi(
     wp += 1
     l = leg(course, wp)
     along = alongOf(l, ai.bike.pos)
-    lane = laneFor(course, wp, l, along, colliders, obstacles)
+    lane = pickLane(course, wp, l, along, colliders, obstacles, follow)
   }
 
   const end = turnAlong(course, wp, endLane(course, wp, lane))
@@ -412,8 +460,8 @@ export function stepAi(
   const crawl = speed < BALANCE_SPEED && lost ? CRAWL_SPEED : Infinity
   const probe = { x: pos.x + Math.sin(heading) * WALL_PROBE, z: pos.z + Math.cos(heading) * WALL_PROBE }
   // 倒退時轉向方向相反，所以 right 跟 error 同號；倒退速度壓在摔車門檻以下，撞到後面也只會彈開
-  const straight = pace(spec, style, ai.bike.stamina, sprinting(ai, style, course))
-  const goal = Math.min(straight.speed, ahead, turning, blocked, crawl)
+  const straight = pace(aidedSpec(spec, aid), style, ai.bike.stamina, sprint)
+  const goal = Math.min(straight.speed, ahead, turning, blocked, crawl, follow ? followSpeed(ai.bike, follow) : Infinity)
   // 只在直線上衝極速時按著踩，要減速過彎、跟車、慢騎時照常放開；衝刺結束退回直線速度時放開滑行，不煞車
   const paced = goal === straight.speed
   const want = Math.max(paced ? 0 : -1, throttle(speed, goal, straight.push && paced))
@@ -426,7 +474,7 @@ export function stepAi(
           right: steer(speed, -error * STEER_GAIN),
           handbrake: false,
         }
-  const bike = stepBike(ai.bike, spec, input, dt, colliders, obstacles)
+  const bike = stepBike(ai.bike, spec, input, dt, colliders, obstacles, aid)
 
   const moved = Math.hypot(bike.pos.x - ai.anchor.x, bike.pos.z - ai.anchor.z) >= STUCK_DISTANCE
   const still = moved ? 0 : ai.still + (blocked === 0 ? dt * WAITING_RATE : dt)

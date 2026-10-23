@@ -5,6 +5,7 @@ import {
   FINISH_GRACE_MS,
   RACE_LIMIT_MS,
   aiLimit,
+  drawGrid,
   aiName,
   goTime,
   prepEnd,
@@ -93,5 +94,31 @@ describe('G4 比賽結束', () => {
   test('AI 名字是「AI 1」到「AI 5」；AI 上限是 6 減玩家數', () => {
     expect([0, 1, 2, 3, 4].map(aiName)).toEqual(['AI 1', 'AI 2', 'AI 3', 'AI 4', 'AI 5'])
     expect([1, 2, 5, 6].map(aiLimit)).toEqual([5, 4, 1, 0])
+  })
+})
+
+describe('G1 開賽', () => {
+  test('[G1-5] 起跑格隨機：玩家各抽一格不重複，都落在玩家加 AI 的格數內，剩下的格子給 AI', () => {
+    const counts = [0, 0, 0, 0]
+    for (let k = 0; k < 400; k++) {
+      const grid = drawGrid(['a', 'b'], 2)
+      expect(Object.keys(grid).sort()).toEqual(['a', 'b'])
+      expect(grid.a).not.toBe(grid.b)
+      for (const slot of Object.values(grid)) {
+        expect(slot).toBeGreaterThanOrEqual(0)
+        expect(slot).toBeLessThan(4)
+      }
+      counts[grid.a!]!++
+    }
+    for (const c of counts) expect(c).toBeGreaterThan(50)
+  })
+
+  test('[G1-5] 給定亂數時結果固定', () => {
+    let seed = 1
+    const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647
+    const first = drawGrid(['a', 'b', 'c'], 3, rand)
+    seed = 1
+    expect(drawGrid(['a', 'b', 'c'], 3, rand)).toEqual(first)
+    expect(drawGrid(['solo'], 0)).toEqual({ solo: 0 })
   })
 })

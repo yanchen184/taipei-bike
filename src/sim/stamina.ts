@@ -33,10 +33,10 @@ export function regenRate(level: number): number {
   return REGEN_BASE + REGEN_RATE * level
 }
 
-/** 推進 dt 秒；pedaling 是這段時間有沒有踩（耗盡時呼叫端不應傳 true） */
-export function stepStamina(s: Stamina, pedaling: boolean, dt: number): Stamina {
+/** 推進 dt 秒；pedaling 是這段時間有沒有踩（耗盡時呼叫端不應傳 true）；drain 是消耗倍率（破風、後追） */
+export function stepStamina(s: Stamina, pedaling: boolean, dt: number, drain = 1): Stamina {
   if (pedaling && !s.spent) {
-    const level = Math.max(0, s.level - drainRate(s.effort) * dt)
+    const level = Math.max(0, s.level - drainRate(s.effort) * drain * dt)
     return { level, effort: s.effort + dt, spent: level <= 0 }
   }
   const level = Math.min(1, s.level + regenRate(s.level) * dt)
