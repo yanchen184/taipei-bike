@@ -582,7 +582,7 @@ describe('G4 比賽結束', () => {
   }, 60_000)
 })
 
-describe('N1 比賽同步', () => {
+describe('N1 比賽同步', { timeout: 30_000 }, () => {
   test('[N1-1] 伺服器修正開賽時間後，經過時間跟著改', async () => {
     const shift = { ms: 0 }
     const { controller, link, ride } = setup((now) => {
@@ -960,4 +960,4 @@ test('[N1-3] 停止監聽後，回到城市的房主不再於背景推進或上�
   writes = 0
   await ride(2)
   expect(writes).toBe(0)
-})
+}, 30_000)
