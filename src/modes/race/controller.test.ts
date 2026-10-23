@@ -7,7 +7,7 @@ import { COUNTDOWN_MS, PREP_MS, goTime, type Progress, type RaceMeta } from '../
 import { INTERP_DELAY } from '../../sim/sync'
 import type { Vec2 } from '../../sim/types'
 import { BIKE_SPEC } from '../../sim/vehicle'
-import { RaceController } from './controller'
+import { AI_SEND_MS, RaceController } from './controller'
 import { EMPTY_RACE, localRaceLink, type RaceEntrant, type RaceLink, type RaceSnapshot } from './link'
 
 const DT = 1 / 30
@@ -385,6 +385,18 @@ test('[G1-4] 房主開新的一局時，兩位參賽者都回到新一局的起�
   }
 })
 
+test('[D6-4] 比賽中按 B 召喚無效，仍騎在起跑格的比賽腳踏車上', async () => {
+  const { engine, controller, player } = setup()
+  await controller.start(0)
+  const course = controller.course()!
+  const bike = player().bike
+
+  engine.action('summonBike')
+
+  expect(player().bike).toBe(bike)
+  expect(player().pos).toEqual(course.grid[0]!.pos)
+})
+
 describe('G2 倒數與騎行', () => {
   test('[G2-1] 倒數 3 秒內按 W 不會移動，倒數結束後可以騎', async () => {
     const { controller, ride, player } = setup()
@@ -634,17 +646,22 @@ describe('N1 比賽同步', () => {
     await me.controller.start(2)
     await ride(10)
     const lean = () => me.controller.aiRiders()[0]!.lean ?? 0
-    for (let k = 0; k < 6000 && Math.abs(lean()) < 0.15; k++) await ride(DT)
+    const history: { t: number; lean: number }[] = []
+    for (let k = 0; k < 6000 && Math.abs(lean()) < 0.15; k++) {
+      await ride(DT)
+      history.push({ t: now(), lean: lean() })
+    }
     expect(Math.abs(lean())).toBeGreaterThanOrEqual(0.15)
-    const history: { t: number; lean: number }[] = [{ t: now(), lean: lean() }]
     const shown: number[] = []
     for (let k = 0; k < 15; k++) {
       await ride(DT)
       history.push({ t: now(), lean: lean() })
-      const past = history.filter((h) => h.t <= now() - INTERP_DELAY).at(-1)
-      if (!past || past === history[0]) continue
+      // 內插值落在前後兩筆同步資料之間，所以在房主那段時間的傾角範圍內
+      const at = now() - INTERP_DELAY
+      const near = history.filter((h) => h.t >= at - AI_SEND_MS - DT * 1000 && h.t <= at + AI_SEND_MS).map((h) => h.lean)
       const drawn = other.controller.aiRiders()[0]!.lean ?? 0
-      expect(Math.abs(drawn - past.lean)).toBeLessThan(0.1)
+      expect(drawn).toBeGreaterThanOrEqual(Math.min(...near) - 0.01)
+      expect(drawn).toBeLessThanOrEqual(Math.max(...near) + 0.01)
       shown.push(drawn)
     }
     expect(Math.max(...shown.map(Math.abs))).toBeGreaterThan(0.1)

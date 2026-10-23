@@ -157,6 +157,17 @@ export function dismountBike(state: PlayerState, city: CityMap): PlayerState {
   return { ...stepOff(state, state.bike, BIKE_SPEC.radius, city), bike: restingBike(state.bike) }
 }
 
+/** 召喚腳踏車：舊的那台收起，新車放在離玩家最近的路面並騎上去 */
+export function summonBike(state: PlayerState, city: CityMap, spec: VehicleSpec): PlayerState {
+  return mountBike(state, nearestRoadPose(city, state.pos), spec)
+}
+
+/** 下車並把腳踏車收起來，不留在路上 */
+export function stowBike(state: PlayerState, city: CityMap): PlayerState {
+  if (state.mode !== 'bike' || !state.bike) return state
+  return { ...stepOff(state, state.bike, BIKE_SPEC.radius, city), bike: null }
+}
+
 export function callCar(state: PlayerState, city: CityMap): PlayerState {
   const pose = nearestRoadPose(city, state.pos)
   return { ...state, car: { pos: pose.pos, heading: pose.heading, speed: 0 } }

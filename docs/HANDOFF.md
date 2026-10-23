@@ -16,6 +16,7 @@
 | WO7 競速連線 | 已 commit（2754108、review 修正 e93aa27）；完整 flow:status 本機節點全 ✅；Codex 第 1–7 輪的問題都已修，Codex 第 9 輪 VERDICT: APPROVED（2026-10-12） |
 | WO8 上線驗收 | 完成（2026-10-13）：規則已部署到 bikes-bbd76；main = b914f67，GitHub Actions 部署成功；線上 `flow:status` 32 個節點全 ✅（含 S1、S2） |
 | WO9 賽前整備站 | 規格已寫進 00-rules §12、01-flow W1–W5、A2、N3（2026-10-13，尊上審過草稿）；尚未實作 |
+| WO14 台北東區路網、路名牌、自由騎車與商店 | 2026-10-23 實作（docs/work-orders/WO14-taipei-garage.md） |
 
 ### WO7 已驗證（2026-10-12，本機，commit e93aa27）
 

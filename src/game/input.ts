@@ -6,6 +6,7 @@ export type Axes = Omit<PlayerInput, 'cameraYaw'>
 const ACTION_KEYS: Record<string, Action> = {
   KeyE: 'interact',
   KeyQ: 'callCar',
+  KeyB: 'summonBike',
   KeyR: 'reset',
   KeyC: 'camera',
   KeyH: 'horn',

@@ -2,11 +2,15 @@ import { useMemo } from 'react'
 import * as THREE from 'three'
 import type { CityMap } from '../../sim/types'
 import { Instanced, type Placement } from '../Instanced'
+import { plateFaces, plateWidth } from './Signs'
 
 const DECK_WIDTH = 8
 const DECK_THICKNESS = 1.2
 const STATION_HEIGHT = 6
 const STATION_ROOF = 0.6
+const NAME_HEIGHT = 1.4
+const NAME_CHAR = 1.1
+const NAME_COLORS = { bg: '#1d5fae', fg: '#ffffff' }
 
 const concrete = new THREE.MeshLambertMaterial({ color: '#c5c3bd' })
 const station = new THREE.MeshLambertMaterial({ color: '#e8e6df' })
@@ -49,6 +53,15 @@ export function Mrt({ city }: { city: CityMap }) {
       <Instanced items={parts.pillars} material={concrete} />
       <Instanced items={parts.stations} material={station} />
       <Instanced items={parts.roofs} material={roof} />
+      {parts.stations.map((s, k) => {
+        const name = `${mrt.name} ${mrt.stationNames[k]}站`
+        // 一塊橫穿車站的牌子，東西兩面露在站體外
+        return (
+          <mesh key={name} position={[s.x, s.y + STATION_HEIGHT / 2, s.z]} rotation={[0, Math.PI / 2, 0]} material={plateFaces(name, NAME_COLORS)}>
+            <boxGeometry args={[plateWidth(name, NAME_CHAR), NAME_HEIGHT, s.sx + 0.2]} />
+          </mesh>
+        )
+      })}
     </group>
   )
 }

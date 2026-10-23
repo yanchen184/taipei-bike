@@ -1,7 +1,12 @@
-import { useHud } from '../../game/EngineContext'
+import { useState } from 'react'
+import { useEngine, useHud } from '../../game/EngineContext'
+import { Shop } from './Shop'
 
 export function FreeRoamHud() {
+  const engine = useEngine()
   const hud = useHud()
+  const [shopOpen, setShopOpen] = useState(false)
+  const canSummon = hud.mode !== 'drive' && hud.homeId === null
   return (
     <>
       {hud.prompt && (
@@ -14,6 +19,29 @@ export function FreeRoamHud() {
           {hud.greeting}
         </div>
       )}
+      <div className="absolute left-4 top-32 flex flex-col gap-2">
+        <button
+          type="button"
+          data-testid="open-shop"
+          className="rounded-xl bg-amber-400 px-4 py-2 font-bold text-stone-900 shadow"
+          onClick={() => setShopOpen(true)}
+        >
+          進入商店
+        </button>
+        <button
+          type="button"
+          data-testid="summon-bike"
+          disabled={!canSummon}
+          className="rounded-xl bg-emerald-500 px-4 py-2 font-bold text-white shadow disabled:cursor-not-allowed disabled:opacity-40"
+          onClick={(e) => {
+            engine.action('summonBike')
+            e.currentTarget.blur()
+          }}
+        >
+          召喚腳踏車 (B)
+        </button>
+      </div>
+      {shopOpen && <Shop onClose={() => setShopOpen(false)} />}
     </>
   )
 }

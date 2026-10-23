@@ -93,6 +93,23 @@ export function signTexture(text: string, variant: number): THREE.CanvasTexture 
   return texture(el)
 }
 
+/** 橫式字牌：路名牌、地標立牌、捷運站名；寬度依字數 */
+export function plateTexture(text: string, bg: string, fg: string): THREE.CanvasTexture {
+  const chars = [...text]
+  const [el, ctx] = canvas(56 * chars.length + 32, 80)
+  ctx.fillStyle = bg
+  ctx.fillRect(0, 0, el.width, el.height)
+  ctx.strokeStyle = fg
+  ctx.lineWidth = 4
+  ctx.strokeRect(6, 6, el.width - 12, el.height - 12)
+  ctx.fillStyle = fg
+  ctx.font = 'bold 48px "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(text, el.width / 2, 42)
+  return texture(el)
+}
+
 /** 名牌（其他玩家頭上的暱稱） */
 export function labelTexture(text: string): THREE.CanvasTexture {
   const [el, ctx] = canvas(256, 64)

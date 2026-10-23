@@ -60,7 +60,7 @@ function Game({ engine, online }: Session) {
           <SceneErrorBoundary>
             <World keyboard={keyboard} ModeScene={mode.Scene} onScene={setScene} />
           </SceneErrorBoundary>
-          <Hud />
+          <Hud racing={mode !== freeRoam} />
           <RoomPanel />
           <mode.Hud />
           {mode === freeRoam && <RaceLobby controller={race} />}

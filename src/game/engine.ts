@@ -13,6 +13,8 @@ import {
   mountBike,
   resetCar,
   stepPlayer,
+  stowBike,
+  summonBike,
   type PlayerInput,
   type PlayerState,
 } from '../sim/player'
@@ -25,12 +27,12 @@ import {
   type Route,
   type TrafficState,
 } from '../sim/traffic'
-import type { Build } from '../sim/parts'
+import { bikeSpec, type Build } from '../sim/parts'
 import type { CityMap, Pose } from '../sim/types'
 import type { VehicleSpec } from '../sim/vehicle'
 
 export type CameraMode = 'chase' | 'top'
-export type Action = 'interact' | 'callCar' | 'reset' | 'camera' | 'horn' | 'menu' | 'close'
+export type Action = 'interact' | 'callCar' | 'summonBike' | 'reset' | 'camera' | 'horn' | 'menu' | 'close'
 
 /** 分頁切回前景時的單幀上限（秒），避免一次推進太久 */
 const MAX_FRAME = 0.1
@@ -209,6 +211,14 @@ export class GameEngine {
     this.persist(save)
   }
 
+  /** 商店按「裝上」：存下組裝；正在騎車時原地換成新組裝的腳踏車 */
+  equip(build: Build): void {
+    this.setBuild(build)
+    const p = this.current.player
+    if (p.mode === 'bike' && p.bike) this.setPlayer(mountBike(p, { pos: p.bike.pos, heading: p.bike.heading }, bikeSpec(build)))
+    this.emit()
+  }
+
   /** 下腳踏車，站在車旁 */
   dismountBike(): void {
     this.setPlayer(dismountBike(this.current.player, this.city))
@@ -227,6 +237,12 @@ export class GameEngine {
         break
       case 'callCar':
         if (s.player.mode === 'walk' && s.player.location.kind === 'outdoor') this.setPlayer(callCar(s.player, this.city))
+        break
+      case 'summonBike':
+        if (s.player.mode !== 'drive' && s.player.location.kind === 'outdoor') {
+          const player = summonBike(s.player, this.city, bikeSpec(s.save.build))
+          this.setPlayer(player, player.heading)
+        }
         break
       case 'reset':
         if (s.player.mode === 'drive') this.setPlayer(resetCar(s.player, this.city))
@@ -278,6 +294,10 @@ export class GameEngine {
     }
     if (p.mode === 'drive') {
       this.setPlayer(exitCar(p, this.city))
+      return
+    }
+    if (p.mode === 'bike') {
+      this.setPlayer(stowBike(p, this.city))
       return
     }
     const prompt = doorPrompt(p, this.city)

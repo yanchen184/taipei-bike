@@ -25,13 +25,13 @@ import type { Pose, Vec2 } from '../../sim/types'
 import { EMPTY_RACE, type RaceLink, type RaceSnapshot } from './link'
 
 /** 房主上傳 AI 的最短間隔（毫秒） */
-const AI_SEND_MS = 100
+export const AI_SEND_MS = 100
 /** HUD 經過時間的精度（毫秒） */
 const CLOCK_STEP = 100
 /** 路口提示距離的精度（公尺） */
 const TURN_STEP = 10
-/** 比賽中引擎不處理的按鍵：R 改成回檢查點，E、Q 不能下車或叫車 */
-const BLOCKED_ACTIONS: readonly Action[] = ['interact', 'callCar']
+/** 比賽中引擎不處理的按鍵：R 改成回檢查點，E、Q、B 不能下車、叫車或召喚腳踏車 */
+const BLOCKED_ACTIONS: readonly Action[] = ['interact', 'callCar', 'summonBike']
 
 export interface ResultRow {
   rank: number

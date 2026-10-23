@@ -18,7 +18,8 @@ export interface Road {
   axis: Axis
   index: number
   center: number
-  name: string
+  /** 每一段的路名：第 k 段在第 k 與第 k+1 條交叉道路之間 */
+  segments: string[]
 }
 
 /** i = 南北向道路序號（決定 x），j = 東西向道路序號（決定 z） */
@@ -39,6 +40,8 @@ export interface Block {
   j: number
   rect: Rect
   kind: BlockKind
+  /** 固定位置的地標街廓才有 */
+  name?: string
 }
 
 export type Side = 'n' | 'e' | 's' | 'w'
@@ -88,8 +91,22 @@ export interface Home {
 export interface Mrt {
   roadId: string
   height: number
+  name: string
   pillars: Rect[]
   stations: Rect[]
+  /** 與 stations 一一對應 */
+  stationNames: string[]
+}
+
+/** 路名牌（路口對角）或地標立牌；只是外觀，不參與碰撞 */
+export interface Sign {
+  id: string
+  kind: 'street' | 'landmark'
+  pos: Vec2
+  /** 牌面朝向（前進方向 = (sin h, cos h)） */
+  heading: number
+  /** 路名牌：[東西向路名, 南北向路名]；立牌：[地標名] */
+  lines: string[]
 }
 
 export interface CityMap {
@@ -102,6 +119,7 @@ export interface CityMap {
   props: Prop[]
   homes: Home[]
   mrt: Mrt
+  signs: Sign[]
   walls: Rect[]
   colliders: Rect[]
 }

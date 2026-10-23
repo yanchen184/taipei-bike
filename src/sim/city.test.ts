@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { CAR_LANE_OFFSET, EW_ROAD_NAMES, NS_ROAD_NAMES, ROAD_COUNT, ROAD_WIDTH, generateCity, isOnRoad } from './city'
+import { CAR_LANE_OFFSET, ROAD_COUNT, ROAD_WIDTH, generateCity, isOnRoad, roadNameAt } from './city'
 import { circleHitsRect, isFree, rectsOverlap } from './collide'
 import { CAR_RADIUS } from './player'
 import type { CityMap, Intersection, Rect } from './types'
@@ -126,13 +126,85 @@ describe('C1 城市生成', () => {
     }
   })
 
-  test('[C1-7] 東西向與南北向道路使用規則 §1-3 的路名', () => {
+  test('[C1-7] 東西向與南北向道路使用規則 §1-3 的路名與順序，中山路忠孝東路以北叫中山北路、以南叫中山南路', () => {
     const city = generateCity(7)
-    expect(EW_ROAD_NAMES).toEqual(['市民大道', '忠孝東路', '仁愛路', '信義路', '和平東路'])
-    expect(NS_ROAD_NAMES).toEqual(['中山北路', '新生南路', '復興南路', '敦化南路', '光復南路'])
     const ew = city.roads.filter((r) => r.axis === 'ew').sort((a, b) => a.center - b.center)
     const ns = city.roads.filter((r) => r.axis === 'ns').sort((a, b) => a.center - b.center)
-    expect(ew.map((r) => r.name)).toEqual(EW_ROAD_NAMES)
-    expect(ns.map((r) => r.name)).toEqual(NS_ROAD_NAMES)
+    expect(ew.map((r) => r.segments)).toEqual(
+      ['市民大道', '忠孝東路', '仁愛路', '信義路', '和平東路'].map((name) => Array<string>(ROAD_COUNT - 1).fill(name)),
+    )
+    expect(ns.map((r) => r.segments)).toEqual([
+      ['中山北路', '中山南路', '中山南路', '中山南路'],
+      ...['新生南路', '復興南路', '敦化南路', '光復南路'].map((name) => Array<string>(ROAD_COUNT - 1).fill(name)),
+    ])
+    const zhongshan = ns[0]!
+    const zhongxiao = ew[1]!.center
+    expect(roadNameAt(zhongshan, zhongxiao - 5)).toBe('中山北路')
+    expect(roadNameAt(zhongshan, zhongxiao + 5)).toBe('中山南路')
+    for (const home of city.homes.filter((h) => h.roadName.startsWith('中山'))) {
+      expect(home.roadName).toBe(home.door.z < zhongxiao ? '中山北路' : '中山南路')
+    }
+  })
+
+  test('[C1-9] 每個 seed 的台北101、大安森林公園、東區商店街、文湖線與車站都在規則 §1-4 的固定位置', () => {
+    for (const seed of SEEDS) {
+      const city = generateCity(seed)
+      const block = (i: number, j: number) => city.blocks.find((b) => b.i === i && b.j === j)!
+      expect(block(3, 3)).toMatchObject({ kind: 'landmark', name: '台北101' })
+      expect(block(1, 3)).toMatchObject({ kind: 'park', name: '大安森林公園' })
+      expect(block(2, 0).kind).toBe('shops')
+      expect(block(2, 1).kind).toBe('shops')
+      expect(city.blocks.filter((b) => b.kind === 'landmark')).toHaveLength(1)
+      expect(city.blocks.filter((b) => b.kind === 'park')).toHaveLength(2)
+      expect(city.blocks.filter((b) => b.kind === 'shops')).toHaveLength(4)
+      const tower = city.buildings.find((b) => b.kind === 'tower')!
+      expect(tower.id).toBe('tower3-3')
+
+      const mrtRoad = city.roads.find((r) => r.id === city.mrt.roadId)!
+      expect(mrtRoad.segments[0]).toBe('復興南路')
+      expect(city.mrt.name).toBe('文湖線')
+      expect(city.mrt.stationNames).toEqual(['忠孝復興', '大安'])
+      const ew = (index: number) => city.roads.find((r) => r.axis === 'ew' && r.index === index)!.center
+      const [zx, da] = city.mrt.stations
+      expect(zx!.maxZ).toBeLessThan(ew(1))
+      expect(zx!.minZ).toBeGreaterThan(ew(0))
+      expect(da!.maxZ).toBeLessThan(ew(3))
+      expect(da!.minZ).toBeGreaterThan(ew(2))
+    }
+  })
+
+  test('[C1-10] 每個路口有路名牌寫著交會的兩條路名，路名牌在人行道上不擋路；地標旁有地標名立牌', () => {
+    for (const seed of SEEDS) {
+      const city = generateCity(seed)
+      const streets = city.signs.filter((s) => s.kind === 'street')
+      for (const node of city.intersections) {
+        const near = streets.filter((s) => Math.hypot(s.pos.x - node.x, s.pos.z - node.z) < ROAD_WIDTH)
+        expect(near.length).toBe(2)
+        const ewRoad = city.roads.find((r) => r.axis === 'ew' && r.index === node.j)!
+        const nsRoad = city.roads.find((r) => r.axis === 'ns' && r.index === node.i)!
+        for (const sign of near) {
+          expect(sign.lines).toHaveLength(2)
+          expect(ewRoad.segments).toContain(sign.lines[0])
+          expect(sign.lines[1]).toBe(roadNameAt(nsRoad, sign.pos.z))
+          expect(isOnRoad(city, sign.pos)).toBe(true)
+          const fromLanes = Math.min(
+            Math.abs(sign.pos.x - nsRoad.center),
+            Math.abs(sign.pos.z - ewRoad.center),
+          )
+          expect(fromLanes).toBeGreaterThan(ROAD_WIDTH / 2 - 2)
+        }
+      }
+      for (const name of ['台北101', '大安森林公園']) {
+        const plaque = city.signs.find((s) => s.kind === 'landmark' && s.lines[0] === name)
+        expect(plaque).toBeDefined()
+        const block = city.blocks.find((b) => b.name === name)!
+        const r = block.rect
+        const gap = Math.max(r.minX - plaque!.pos.x, plaque!.pos.x - r.maxX, r.minZ - plaque!.pos.z, plaque!.pos.z - r.maxZ)
+        expect(gap).toBeLessThan(3)
+      }
+      for (const sign of city.signs) {
+        expect(city.colliders.some((c) => circleHitsRect(sign.pos, 0.2, c))).toBe(false)
+      }
+    }
   })
 })

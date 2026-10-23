@@ -14,6 +14,7 @@ import type {
   Rect,
   Road,
   Side,
+  Sign,
   Vec2,
 } from './types'
 
@@ -40,8 +41,28 @@ const PILLAR_SIZE = 1.2
 const PILLAR_SPACING = 12
 const LAMP_SPACING = 20
 
-export const EW_ROAD_NAMES = ['市民大道', '忠孝東路', '仁愛路', '信義路', '和平東路']
-export const NS_ROAD_NAMES = ['中山北路', '新生南路', '復興南路', '敦化南路', '光復南路']
+/** 由北到南 */
+const EW_ROAD_NAMES = ['市民大道', '忠孝東路', '仁愛路', '信義路', '和平東路']
+/** 由西到東；中山路在忠孝東路（第 1 條東西向道路）以北叫中山北路 */
+const NS_ROAD_NAMES = ['中山南路', '新生南路', '復興南路', '敦化南路', '光復南路']
+const NORTH_SEGMENTS: Record<number, { name: string; until: number }> = { 0: { name: '中山北路', until: 1 } }
+
+/** 規則 §1-4 的固定街廓 */
+const FIXED_BLOCKS: { i: number; j: number; kind: BlockKind; name?: string }[] = [
+  { i: 3, j: 3, kind: 'landmark', name: '台北101' },
+  { i: 1, j: 3, kind: 'park', name: '大安森林公園' },
+  { i: 2, j: 0, kind: 'shops' },
+  { i: 2, j: 1, kind: 'shops' },
+]
+const MRT_ROAD = 2
+const MRT_NAME = '文湖線'
+/** 車站在第 span 段（第 span 與 span+1 條東西向道路之間）靠南端 */
+const MRT_STATIONS = [
+  { name: '忠孝復興', span: 0 },
+  { name: '大安', span: 2 },
+]
+const STATION_LENGTH = 30
+const STATION_GAP = 10
 
 const APARTMENT_COLORS = ['#d9cbb3', '#c9c3b8', '#e3d5c8', '#bfb2a0', '#d4c4a8', '#cfd2c9', '#e0c9b6']
 const SHOP_COLORS = ['#c8b8a6', '#b8aea0', '#d6c2a8', '#c2c6c0']
@@ -62,11 +83,23 @@ function blockRect(i: number, j: number): Rect {
   return rect(x0, z0, x0 + BLOCK_SIZE, z0 + BLOCK_SIZE)
 }
 
+function segmentsOf(name: string, north?: { name: string; until: number }): string[] {
+  return Array.from({ length: ROAD_COUNT - 1 }, (_, k) => (north && k < north.until ? north.name : name))
+}
+
 function buildRoads(): Road[] {
   return [
-    ...EW_ROAD_NAMES.map((name, index): Road => ({ id: `ew${index}`, axis: 'ew', index, center: roadCenter(index), name })),
-    ...NS_ROAD_NAMES.map((name, index): Road => ({ id: `ns${index}`, axis: 'ns', index, center: roadCenter(index), name })),
+    ...EW_ROAD_NAMES.map((name, index): Road => ({ id: `ew${index}`, axis: 'ew', index, center: roadCenter(index), segments: segmentsOf(name) })),
+    ...NS_ROAD_NAMES.map(
+      (name, index): Road => ({ id: `ns${index}`, axis: 'ns', index, center: roadCenter(index), segments: segmentsOf(name, NORTH_SEGMENTS[index]) }),
+    ),
   ]
+}
+
+/** 道路在某個沿路座標（ew 道路是 x、ns 道路是 z）那一段的路名 */
+export function roadNameAt(road: Road, along: number): string {
+  const k = Math.floor((along - ROAD_WIDTH / 2) / STRIDE)
+  return road.segments[Math.min(Math.max(k, 0), road.segments.length - 1)]!
 }
 
 function buildIntersections(): Intersection[] {
@@ -81,18 +114,13 @@ function buildIntersections(): Intersection[] {
 
 function assignBlockKinds(rng: Rng): Block[] {
   const n = ROAD_COUNT - 1
-  const inner = [] as { i: number; j: number }[]
-  for (let j = 1; j < n - 1; j++) for (let i = 1; i < n - 1; i++) inner.push({ i, j })
-  const landmark = rng.pick(inner)
-  const rest: BlockKind[] = shuffle(
-    ['park', 'park', 'shops', 'shops', 'shops', 'shops', ...Array<BlockKind>(n * n - 7).fill('apartment')],
-    rng,
-  )
+  const rest: BlockKind[] = shuffle(['park', 'shops', 'shops', ...Array<BlockKind>(n * n - FIXED_BLOCKS.length - 3).fill('apartment')], rng)
   const blocks: Block[] = []
   for (let j = 0; j < n; j++) {
     for (let i = 0; i < n; i++) {
-      const kind = i === landmark.i && j === landmark.j ? 'landmark' : rest.pop()!
-      blocks.push({ id: `blk${i}-${j}`, i, j, rect: blockRect(i, j), kind })
+      const fixed = FIXED_BLOCKS.find((b) => b.i === i && b.j === j)
+      const base = { id: `blk${i}-${j}`, i, j, rect: blockRect(i, j) }
+      blocks.push(fixed ? { ...base, kind: fixed.kind, ...(fixed.name ? { name: fixed.name } : {}) } : { ...base, kind: rest.pop()! })
     }
   }
   return blocks
@@ -176,14 +204,16 @@ function buildRows(block: Block, roads: Road[], rng: Rng): { buildings: Building
         const doorAlong = along + (d === 0 ? -DOOR_SPACING / 2 : DOOR_SPACING / 2)
         const number = houseNumber(doorAlong, side)
         const floor = rng.int(1, floors)
+        const door = doorPosition(block.rect, side, doorAlong)
+        const roadName = roadNameAt(road, road.axis === 'ew' ? door.x : door.z)
         homes.push({
           id: `${road.id}-${number}`,
-          address: `${road.name} ${number} 號 ${floor} 樓`,
-          roadName: road.name,
+          address: `${roadName} ${number} 號 ${floor} 樓`,
+          roadName,
           number,
           floor,
           buildingId: id,
-          door: doorPosition(block.rect, side, doorAlong),
+          door,
           facing: SIDE_HEADING[side],
           seed: rng.int(0, 2 ** 31 - 1),
           resident: residentName(rng),
@@ -234,9 +264,8 @@ function buildLamps(blocks: Block[]): Prop[] {
   return lamps
 }
 
-function buildMrt(rng: Rng): Mrt {
-  const index = rng.int(1, ROAD_COUNT - 2)
-  const x = roadCenter(index)
+function buildMrt(): Mrt {
+  const x = roadCenter(MRT_ROAD)
   const half = PILLAR_SIZE / 2
   const pillars: Rect[] = []
   for (let j = 0; j < ROAD_COUNT - 1; j++) {
@@ -245,10 +274,32 @@ function buildMrt(rng: Rng): Mrt {
       pillars.push(rect(x - half, z - half, x + half, z + half))
     }
   }
-  const stationBlock = rng.int(0, ROAD_COUNT - 2)
-  const sz0 = ROAD_WIDTH + stationBlock * STRIDE
-  const stations = [rect(x - 10, sz0 + 10, x + 10, sz0 + BLOCK_SIZE - 10)]
-  return { roadId: `ns${index}`, height: MRT_HEIGHT, pillars, stations }
+  const stations = MRT_STATIONS.map(({ span }) => {
+    const end = ROAD_WIDTH + span * STRIDE + BLOCK_SIZE - STATION_GAP
+    return rect(x - 10, end - STATION_LENGTH, x + 10, end)
+  })
+  return { roadId: `ns${MRT_ROAD}`, name: MRT_NAME, height: MRT_HEIGHT, pillars, stations, stationNames: MRT_STATIONS.map((s) => s.name) }
+}
+
+/** 路口西北角與東南角各一支路名牌，寫那個角落所在路段的路名；地標街廓北側人行道一支立牌 */
+function buildSigns(roads: Road[], intersections: Intersection[], blocks: Block[]): Sign[] {
+  const inset = ROAD_WIDTH / 2 - SIDEWALK / 2
+  const signs: Sign[] = []
+  for (const node of intersections) {
+    const ew = roads.find((r) => r.axis === 'ew' && r.index === node.j)!
+    const ns = roads.find((r) => r.axis === 'ns' && r.index === node.i)!
+    for (const [d, corner, heading] of [[-1, 'nw', SIDE_HEADING.n], [1, 'se', SIDE_HEADING.s]] as const) {
+      const pos = { x: node.x + d * inset, z: node.z + d * inset }
+      signs.push({ id: `sign${node.i}-${node.j}${corner}`, kind: 'street', pos, heading, lines: [roadNameAt(ew, pos.x), roadNameAt(ns, pos.z)] })
+    }
+  }
+  for (const block of blocks) {
+    if (!block.name) continue
+    const r = block.rect
+    const pos = { x: (r.minX + r.maxX) / 2, z: r.minZ - SIDEWALK / 2 }
+    signs.push({ id: `plaque${block.i}-${block.j}`, kind: 'landmark', pos, heading: SIDE_HEADING.n, lines: [block.name] })
+  }
+  return signs
 }
 
 function buildWalls(): Rect[] {
@@ -300,7 +351,8 @@ export function generateCity(seed: number): CityMap {
   }
   props.push(...buildLamps(blocks))
 
-  const mrt = buildMrt(createRng(hashSeed(seed, 3)))
+  const mrt = buildMrt()
+  const signs = buildSigns(roads, intersections, blocks)
   const walls = buildWalls()
   const colliders = [
     ...buildings.map((b) => b.rect),
@@ -308,7 +360,7 @@ export function generateCity(seed: number): CityMap {
     ...mrt.pillars,
     ...walls,
   ]
-  return { seed, size: CITY_SIZE, roads, intersections, blocks, buildings, props, homes, mrt, walls, colliders }
+  return { seed, size: CITY_SIZE, roads, intersections, blocks, buildings, props, homes, mrt, signs, walls, colliders }
 }
 
 function roadRect(road: Road): Rect {

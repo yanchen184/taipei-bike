@@ -5,14 +5,15 @@ const MINIMAP_GAP = 'right-[13rem]'
 
 const MODE_LABEL = { walk: '步行', drive: '開車', bike: '騎車' } as const
 
-const CONTROLS = 'WASD 移動　Shift 跑　E 上下車／進門　Q 叫車　R 扶正　C 視角　H 喇叭　M 手冊　拖曳滑鼠轉視角'
+const CONTROLS = 'WASD 移動　Shift 跑　E 上下車／進門　Q 叫車　B 召喚腳踏車　R 扶正　C 視角　H 喇叭　M 手冊　拖曳滑鼠轉視角'
+/** 規則 §2-9 自由騎車 */
+const BIKE_CONTROLS = 'W 踩踏　S 煞車／倒退　A／D 轉向　E 下車收車　B 重新召喚　C 視角　M 手冊　拖曳滑鼠轉視角'
 /** 規則 §7「比賽騎車」那一欄 */
 const RACE_CONTROLS = 'W 踩踏　S 煞車／倒退　A／D 轉向　R 回檢查點　C 視角　M 選單　拖曳滑鼠轉視角'
 
-export function Hud() {
+export function Hud({ racing }: { racing: boolean }) {
   const hud = useHud()
-  // 腳踏車只在比賽中騎
-  const riding = hud.mode === 'bike'
+  const riding = racing && hud.mode === 'bike'
   return (
     <>
       <div className="pointer-events-none absolute left-4 top-4 space-y-1 rounded-xl bg-black/55 px-4 py-3 text-white">
@@ -49,7 +50,7 @@ export function Hud() {
         </div>
       )}
       <div data-testid="controls" className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-black/40 px-3 py-1 text-xs text-white/90">
-        {riding ? RACE_CONTROLS : CONTROLS}
+        {riding ? RACE_CONTROLS : hud.mode === 'bike' ? BIKE_CONTROLS : CONTROLS}
       </div>
     </>
   )
